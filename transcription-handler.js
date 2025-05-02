@@ -75,6 +75,8 @@ exports.handler = function(context, event, callback) {
     const recordingUrl = event.RecordingUrl || '';
     const fromNumber = event.From || 'Unknown';
     const toNumber = event.To || 'Unknown';
+    // console.log("Transcription event information follows:");
+    // JSON.stringify(event, null, 4).split('\n').forEach(line => console.log(line));
     const dateTimeStr = getFormattedDateTime(event.RecordingStartTime);
 
     // Download the recording
@@ -129,7 +131,7 @@ exports.handler = function(context, event, callback) {
       })
       .then(result => {
         console.log('Voicemail email sent successfully');
-        callback(null, 'Email sent');
+        callback(null);
       })
       .catch(error => {
         console.error('Error sending email:', error);
@@ -137,6 +139,6 @@ exports.handler = function(context, event, callback) {
       });
   } else {
     // If transcription is not complete, just return
-    callback(null, 'Transcription not complete');
+    callback('Transcription not complete');
   }
 };

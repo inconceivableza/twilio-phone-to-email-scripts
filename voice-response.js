@@ -1,6 +1,8 @@
 exports.handler = function(context, event, callback) {
   // Create a TwiML response
   const twiml = new Twilio.twiml.VoiceResponse();
+  // console.log("Voice event information follows:");
+  // JSON.stringify(event, null, 4).split('\n').forEach(line => console.log(line));
   
   if (context.ANSWER_MESSAGE_URL) {
     console.log("Playing audio answer message");

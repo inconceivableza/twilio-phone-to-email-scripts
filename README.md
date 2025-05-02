@@ -55,6 +55,7 @@ Here's the complete setup for Twilio Functions that will capture voicemails, dow
 - **Voicemail Capture**: Takes voicemail messages with a customizable greeting
 - **Transcription**: Automatically transcribes voicemail content for easy reading
 - **Email Forwarding**: Sends both voicemails and SMS to your email
+- **Recording Attachment**: Downloads the audio file and attaches it to the email
 - **Online Link**: Also includes a link to the online recording
 
 == How It Works

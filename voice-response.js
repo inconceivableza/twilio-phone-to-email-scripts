@@ -20,9 +20,6 @@ exports.handler = function(context, event, callback) {
     transcribe: true,
     finishOnKey: '*'
   });
-  
-  twiml.say('Thank you for your message. Goodbye.');
-  
   // Return the TwiML response
   callback(null, twiml);
 };

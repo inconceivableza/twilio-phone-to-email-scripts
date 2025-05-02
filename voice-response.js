@@ -2,8 +2,14 @@ exports.handler = function(context, event, callback) {
   // Create a TwiML response
   const twiml = new Twilio.twiml.VoiceResponse();
   
-  // Add a greeting
-  twiml.say('Thank you for calling ' + context.ANSWER_MESSAGE_NAME +  '. Please leave a message after the tone. Press star when finished.');
+  if (context.ANSWER_MESSAGE_URL) {
+    console.log("Playing audio answer message");
+    twiml.play(context.ANSWER_MESSAGE_URL);
+  } else {
+    console.log("Generating audio answer speech");
+    const name = context.ANSWER_MESSAGE_NAME || 'us';
+    twiml.say('Thank you for calling ' + name +  '. Please leave a message after the tone. Press star when finished.');
+  }
   
   // Configure recording with transcription
   twiml.record({

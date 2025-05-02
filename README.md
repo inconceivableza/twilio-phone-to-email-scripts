@@ -24,7 +24,8 @@ Here's the complete setup for Twilio Functions that will capture voicemails, dow
    - `MAILJET_API_SECRET`: Your Mailjet API secret
    - `FORWARDING_EMAIL`: The email where you want to receive voicemails and SMS
    - `FROM_EMAIL`: The verified email that will appear as the sender
-   - `ANSWER_MESSAGE_NAME`: The name to include in your answering machine message.
+   - `ANSWER_MESSAGE_URL`: A public URL containing a message to play on your answer phone (optional, can be set to point to a Twilio Asset you have uploaded).
+   - `ANSWER_MESSAGE_NAME`: The name to include in your answering machine message (optional, defaults to "us").
 
 == Step 5: Configure Dependencies
 

@@ -3,7 +3,7 @@ exports.handler = function(context, event, callback) {
   const twiml = new Twilio.twiml.VoiceResponse();
   
   // Add a greeting
-  twiml.say('Thank you for calling Inconceivable R and D. Please leave a message after the tone. Press star when finished.');
+  twiml.say('Thank you for calling ' + context.ANSWER_MESSAGE_NAME +  '. Please leave a message after the tone. Press star when finished.');
   
   // Configure recording with transcription
   twiml.record({

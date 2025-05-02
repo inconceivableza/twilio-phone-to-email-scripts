@@ -2,19 +2,11 @@ const mailjet = require('node-mailjet');
 const axios = require('axios');
 
 /**
- * Generates a formatted date-time string for filenames from RFC 2822 date string
- * @param {string} rfc2822DateString - Date string in RFC 2822 format
+ * Generates a formatted date-time string for filenames from current date
  * @returns {string} Formatted date-time string (YYYY-MM-DD_HH-MM-SS)
  */
-function getFormattedDateTime(rfc2822DateString) {
-  // Parse the RFC 2822 date string
-  let date = rfc2822DateString? new Date(rfc2822DateString) : null;
-
-  // Handle invalid date
-  if (date === null || isNaN(date.getTime())) {
-    console.warn(`Invalid date string: ${rfc2822DateString}, using current time instead`);
-    date = new Date();
-  }
+function getFormattedDateTime() {
+  const date = new Date();
 
   return date.getFullYear() + '-' +
          String(date.getMonth() + 1).padStart(2, '0') + '-' +
@@ -77,7 +69,7 @@ exports.handler = function(context, event, callback) {
     const toNumber = event.To || 'Unknown';
     // console.log("Transcription event information follows:");
     // JSON.stringify(event, null, 4).split('\n').forEach(line => console.log(line));
-    const dateTimeStr = getFormattedDateTime(event.RecordingStartTime);
+    const dateTimeStr = getFormattedDateTime();
 
     // Download the recording
     const attachmentFilename = `voicemail_${fromNumber.replace('+', '')}_${dateTimeStr}.mp3`;

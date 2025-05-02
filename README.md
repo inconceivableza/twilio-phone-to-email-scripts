@@ -7,16 +7,24 @@ Here's the complete setup for Twilio Functions that will capture voicemails, dow
 - Sign up at twilio.com
 - Buy a phone number with voice and SMS capabilities
 
-== Step 2: Create a Twilio Functions Service
+== Step 2: Add Voice Recordings (Optional)
+
+If you would like personalized greetings, record a message asking the caller to leave a message, and/or one thanking them for their message:
+- Use your own software to record the messages and save them as MP3 files
+- In your Twilio dashboard, navigate to "Functions and Assets" > "Assets"
+- Upload the mp3 files as public assets.
+- You can copy the URLs from here to fill in environment variables that will use these files later.
+
+== Step 3: Create a Twilio Functions Service
 
 - Navigate to "Functions and Assets" > "Services" in your Twilio dashboard
 - Click "Create Service" and give it a name (e.g., "Voicemail Forwarding")
 
-== Step 3: Add the Functions to Your Service
+== Step 4: Add the Functions to Your Service
 
 - Create each of the four functions in your Twilio Functions service by clicking the "+" button and adding each file with its corresponding code. All functions use JavaScript designed specifically for Twilio's environment.
 
-== Step 4: Set Up Environment Variables
+== Step 5: Set Up Environment Variables
 
 - In your Twilio Functions service, go to "Settings" > "Environment Variables"
 - Add these variables:
@@ -28,7 +36,7 @@ Here's the complete setup for Twilio Functions that will capture voicemails, dow
    - `ANSWER_MESSAGE_NAME`: The name to include in your answering machine message (optional, defaults to "us").
    - `THANK_YOU_MESSAGE_URL`: A public URL containing a message to play to thank the caller for their message (optional, can be set to point to a Twilio Asset you have uploaded).
 
-== Step 5: Configure Dependencies
+== Step 6: Configure Dependencies
 
 - Go to "Settings" > "Dependencies" in your Twilio Functions service
 - Add these dependencies:
@@ -36,7 +44,7 @@ Here's the complete setup for Twilio Functions that will capture voicemails, dow
    - `node-mailjet`: version `^6.0.2`
    - `axios`: version `^1.3.6`
 
-== Step 6: Deploy Your Functions
+== Step 7: Deploy Your Functions
 
 - Click "Deploy All" to deploy your functions
 

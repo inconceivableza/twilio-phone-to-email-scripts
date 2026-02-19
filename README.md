@@ -3,7 +3,9 @@ Twilio Phone to Email Scripts
 
 This is a set of [Twilio](https://twilio.com/) Functions that will capture voicemails, download recordings, and send them as email attachments along with transcriptions, and forward SMS messages, using the [Mailjet](https://www.mailjet.com/) email service. All code is in JavaScript, ready for Twilio's [serverless Functions environment](https://www.twilio.com/docs/serverless/functions-assets/functions).
 
-This code can be used to cost-effectively service an unattended phone number.
+Optionally, incoming calls can ring a SIP client (e.g. Zoiper) first, falling back to voicemail+email if unanswered. The SIP client can also make outbound PSTN calls through the Twilio number.
+
+This code can be used to cost-effectively service an unattended phone number, or as a lightweight softphone setup with voicemail.
 
 Step 1: Create a Twilio Account and Purchase a Number
 -------
@@ -29,20 +31,37 @@ Step 3: Create a Twilio Functions Service
 Step 4: Add the Functions to Your Service
 -------
 
-- Create each of the four functions in your Twilio Functions service by clicking the "+" button and adding each file with its corresponding code.
+- Create the functions in your Twilio Functions service by clicking the "+" button and adding each file with its corresponding code:
+   - `voice-response` — answers incoming calls (SIP dial or voicemail)
+   - `recording-handler` — handles completed recordings
+   - `transcription-handler` — emails voicemail transcriptions with recording attached
+   - `sms-handler` — forwards SMS to email (and optionally to another phone number)
+   - `sip-voicemail-fallback` — voicemail fallback when SIP client doesn't answer (only needed with SIP)
+   - `sip-outbound` — bridges outbound calls from SIP client to PSTN (only needed with SIP)
 
 Step 5: Set Up Environment Variables
 -------
 
-- In your Twilio Functions service, go to "Settings" > "Environment Variables"
-- Add these variables:
+In your Twilio Functions service, go to "Settings" > "Environment Variables" and add these variables:
+
+**Required:**
    - `MAILJET_API_KEY`: Your Mailjet API key
    - `MAILJET_API_SECRET`: Your Mailjet API secret
    - `FORWARDING_EMAIL`: The email where you want to receive voicemails and SMS
    - `FROM_EMAIL`: The verified email that will appear as the sender
-   - `ANSWER_MESSAGE_URL`: A public URL containing a message to play on your answer phone (optional, can be set to point to a Twilio Asset you have uploaded).
-   - `ANSWER_MESSAGE_NAME`: The name to include in your answering machine message (optional, defaults to "us").
-   - `THANK_YOU_MESSAGE_URL`: A public URL containing a message to play to thank the caller for their message (optional, can be set to point to a Twilio Asset you have uploaded).
+
+**Optional (voicemail greeting):**
+   - `ANSWER_MESSAGE_URL`: A public URL containing a message to play on your answer phone (can be set to point to a Twilio Asset you have uploaded)
+   - `ANSWER_MESSAGE_NAME`: The name to include in your answering machine message (defaults to "us")
+   - `THANK_YOU_MESSAGE_URL`: A public URL containing a message to play to thank the caller for their message (can be set to point to a Twilio Asset you have uploaded)
+
+**Optional (SIP):**
+   - `SIP_DOMAIN`: Full SIP domain hostname (e.g. `yourname.sip.ie1.twilio.com`). Setting this enables SIP support.
+   - `SIP_INBOUND`: Set to `false` to skip SIP for incoming calls (outbound-only mode). Default: `true` when `SIP_DOMAIN` is set.
+   - `SIP_DIAL_TIMEOUT`: Seconds to ring SIP client before falling back to voicemail (default: `20`)
+
+**Optional (SMS forwarding):**
+   - `SMS_FORWARD_NUMBER`: Phone number in E.164 format (e.g. `+353861234567`) to forward incoming SMS to, in addition to email
 
 Step 6: Configure Dependencies
 -------
@@ -71,6 +90,32 @@ Step 8: Configure Your Twilio Phone Number
    - Select your service and the `sms-handler` function
 - Save your changes
 
+Step 9: Set Up SIP Domain (Optional)
+-------
+
+If you want to use a SIP client (e.g. Zoiper) to make and receive calls:
+
+1. **Create SIP Domain**: In your Twilio dashboard, go to "Voice" > "SIP Domains" > "Create SIP Domain"
+   - Choose a name (e.g. `yourname`) — your full domain will be `yourname.sip.twilio.com`
+   - Under "A Call Comes In", set it to "Function", select your service and the `sip-outbound` function, using **HTTP POST**
+   - Under "SIP Registration", enable it and add a credential list
+
+2. **Create Credential List**: Go to "SIP Domains" > "Credential Lists"
+   - Create a credential list with a username and password for your SIP client
+
+3. **Configure your SIP client** (e.g. Zoiper):
+   - Server/Domain: your SIP domain (e.g. `yourname.sip.twilio.com`)
+   - Username: the credential list username
+   - Password: the credential list password
+   - To dial out: enter the destination number in E.164 format (e.g. `+15551234567`)
+
+4. **Add environment variables**: Set `SIP_DOMAIN` in your Functions environment variables to match your SIP domain hostname
+
+**SIP mode combinations:**
+- `SIP_DOMAIN` not set: no SIP at all, original email-only voicemail behavior
+- `SIP_DOMAIN` set (default): incoming calls ring SIP client first, fall back to voicemail+email if unanswered; outbound calls from SIP client work
+- `SIP_DOMAIN` set + `SIP_INBOUND=false`: outbound SIP calls only; incoming calls go straight to voicemail+email
+
 Key Features of This Setup
 =======
 
@@ -79,18 +124,38 @@ Key Features of This Setup
 - **Email Forwarding**: Sends both voicemails and SMS to your email
 - **Recording Attachment**: Downloads the audio file and attaches it to the email
 - **Online Link**: Also includes a link to the online recording
+- **SIP Support**: Optionally ring a SIP client before voicemail, and make outbound calls
+- **SMS Forwarding**: Optionally forward SMS to another phone number in addition to email
 
 How It Works
 =======
 
-Voice Calls
+Voice Calls (Voicemail Only)
 -------
 
-When someone calls your Twilio number:
+When someone calls your Twilio number and SIP is not configured:
 
 - They hear a greeting and can leave a message
 - Twilio transcribes the message and sends it to the transcription handler
 - The transcription handler downloads the recording, attaches it to an email, and sends it via Mailjet
+
+Voice Calls (With SIP)
+-------
+
+When someone calls your Twilio number and SIP is configured:
+
+- The call rings your SIP client (e.g. Zoiper) for the configured timeout
+- If answered: two-way audio conversation proceeds normally
+- If unanswered (busy, no answer, offline): the caller hears a greeting and can leave a voicemail, which is emailed as above
+
+Outbound Calls (SIP)
+-------
+
+When you dial from your SIP client:
+
+- The SIP domain webhook routes the call to `sip-outbound`
+- The destination number and caller ID are extracted from the SIP URI
+- The call is bridged to the PSTN number with your Twilio number as caller ID
 
 SMS Messages
 -------
@@ -98,6 +163,9 @@ SMS Messages
 When someone texts your Twilio number:
 
 - The SMS handler forwards the message to your email via Mailjet
+- If `SMS_FORWARD_NUMBER` is set, the SMS is also forwarded to that phone number (prefixed with the original sender's number)
+
+**Note:** Twilio SIP does not support the SIP MESSAGE protocol, so SMS messages cannot be delivered directly to a SIP client. Use email forwarding and/or SMS forwarding to another phone number instead.
 
 Cost and Usage
 =======
@@ -112,6 +180,7 @@ These are at the time of writing; please consult [Twilio's pricing page](https:/
 - Twilio Functions: Free up to 10,000 invocations/month
 - Text to Speech: $0.0008 per hundred characters (see [pricing](https://www.twilio.com/docs/voice/twiml/say/text-speech#pricing))
 - Mailjet: Free tier includes 200 emails/day (see [pricing](https://www.mailjet.com/pricing/))
+- SIP registration: no additional cost (included with Twilio)
 
 For typical personal use, this entire setup should cost around $1-3 per month.
 

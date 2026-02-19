@@ -28,18 +28,31 @@ exports.handler = function(context, event, callback) {
   };
   
   // Send the email
-  mailjetClient
+  const emailPromise = mailjetClient
     .post('send', { version: 'v3.1' })
     .request(emailData)
     .then(() => {
       console.log('SMS email sent successfully');
-      
-      // Return empty TwiML response (no SMS auto-reply)
+    });
+
+  // Optionally forward the SMS to another phone number
+  const smsPromise = context.SMS_FORWARD_NUMBER
+    ? context.getTwilioClient().messages.create({
+        to: context.SMS_FORWARD_NUMBER,
+        from: event.To,
+        body: `SMS from ${event.From}:\n${event.Body}`
+      }).then(() => {
+        console.log(`SMS forwarded to ${context.SMS_FORWARD_NUMBER}`);
+      })
+    : Promise.resolve();
+
+  Promise.all([emailPromise, smsPromise])
+    .then(() => {
       const twiml = new Twilio.twiml.MessagingResponse();
       callback(null, twiml);
     })
     .catch(error => {
-      console.error('Error sending email:', error);
+      console.error('Error in SMS handler:', error);
       callback(error);
     });
 };

@@ -1,22 +1,13 @@
 exports.handler = function(context, event, callback) {
   const twiml = new Twilio.twiml.VoiceResponse();
+  const status = event.DialCallStatus;
+  console.log(`SIP dial result: ${status}`);
 
-  const sipEnabled = context.SIP_DOMAIN && context.SIP_INBOUND !== 'false';
-
-  if (sipEnabled) {
-    // Ring the SIP client first; if unanswered, fall back to voicemail
-    const timeout = parseInt(context.SIP_DIAL_TIMEOUT, 10) || 20;
-    const sipUri = `sip:${event.To}@${context.SIP_DOMAIN}`;
-    console.log(`Dialing SIP: ${sipUri} (timeout ${timeout}s)`);
-
-    const dial = twiml.dial({
-      timeout: timeout,
-      action: '/sip-voicemail-fallback',
-      callerId: event.From
-    });
-    dial.sip(sipUri);
+  if (status === 'completed') {
+    // Call was answered and has ended; nothing more to do
+    twiml.hangup();
   } else {
-    // Voicemail-only path (original behavior)
+    // SIP unavailable (busy, no-answer, failed, canceled) — fall back to voicemail
     if (context.ANSWER_MESSAGE_URL) {
       console.log("Playing audio answer message");
       twiml.play(context.ANSWER_MESSAGE_URL);

@@ -3,15 +3,16 @@ Twilio Phone to Email Scripts
 
 This is a set of [Twilio](https://twilio.com/) Functions that will capture voicemails, download recordings, and send them as email attachments along with transcriptions, and forward SMS messages, using the [Mailjet](https://www.mailjet.com/) email service. All code is in JavaScript, ready for Twilio's [serverless Functions environment](https://www.twilio.com/docs/serverless/functions-assets/functions).
 
-Optionally, incoming calls can ring a SIP client (e.g. Zoiper) first, falling back to voicemail+email if unanswered. The SIP client can also make outbound PSTN calls through the Twilio number.
+Optionally, incoming calls can ring a SIP client (e.g. Zoiper) first, falling back to voicemail+email if unanswered. The SIP client can also make outbound PSTN calls through the Twilio number. Multiple phone numbers on the same account are supported — each number gets its own SIP credential and rings independently.
 
-This code can be used to cost-effectively service an unattended phone number, or as a lightweight softphone setup with voicemail.
+This code can be used to cost-effectively service one or more unattended phone numbers, or as a lightweight softphone setup with voicemail.
 
 Step 1: Create a Twilio Account and Purchase a Number
 -------
 
 - Sign up at twilio.com
-- Buy a phone number with voice and SMS capabilities
+- Buy one or more phone numbers with voice and SMS capabilities
+- All numbers on the same account share the same Functions service and SIP domain
 
 Step 2: Add Voice Recordings (Optional)
 -------
@@ -81,14 +82,15 @@ Step 8: Configure Your Twilio Phone Number
 -------
 
 - Navigate to "Phone Numbers" > "Manage" > "Active Numbers"
-- Click on your phone number
-- For "Voice & Fax" configuration:
-   - Set "A Call Comes In" to "Function"
-   - Select your service and the `voice-response` function
-- For "Messaging" configuration:
-   - Set "A Message Comes In" to "Function"
-   - Select your service and the `sms-handler` function
-- Save your changes
+- For **each** phone number, click on it and configure:
+   - For "Voice & Fax" configuration:
+      - Set "A Call Comes In" to "Function"
+      - Select your service and the `voice-response` function
+   - For "Messaging" configuration:
+      - Set "A Message Comes In" to "Function"
+      - Select your service and the `sms-handler` function
+   - Save your changes
+- Repeat for every phone number on the account — they all point to the same functions
 
 Step 9: Set Up SIP Domain (Optional)
 -------
@@ -101,19 +103,25 @@ If you want to use a SIP client (e.g. Zoiper) to make and receive calls:
    - Under "SIP Registration", enable it and add a credential list
 
 2. **Create Credential List**: Go to "SIP Domains" > "Credential Lists"
-   - Create a credential list with a username and password for your SIP client
+   - Create a credential list with one entry **per phone number**
+   - The **username must be the phone number in E.164 format** (e.g. `+15551234567`)
+   - Choose any password for each entry
+   - This is what allows multiple numbers to work: when a call comes in to a number, the system dials `sip:{that number}@{SIP_DOMAIN}`, which rings only the SIP client registered with that number as its username
 
 3. **Configure your SIP client** (e.g. Zoiper):
+   - Create one SIP account per phone number
    - Server/Domain: your SIP domain (e.g. `yourname.sip.twilio.com`)
-   - Username: the credential list username
-   - Password: the credential list password
-   - To dial out: enter the destination number in E.164 format (e.g. `+15551234567`)
+   - Username: the phone number in E.164 format (e.g. `+15551234567`)
+   - Password: the password you set for that credential
+   - To dial out: enter the destination number in E.164 format (e.g. `+353861234567`) — the caller ID will automatically be the Twilio number used as the SIP username
 
 4. **Add environment variables**: Set `SIP_DOMAIN` in your Functions environment variables to match your SIP domain hostname
 
+**Multiple numbers:** All phone numbers share a single SIP domain and Functions service. Each number is distinguished by its SIP credential username. A SIP client registered as `+15551234567` will only ring for calls to that number. You can register multiple numbers in the same SIP client (e.g. Zoiper supports multiple SIP accounts) or use different clients for different numbers.
+
 **SIP mode combinations:**
 - `SIP_DOMAIN` not set: no SIP at all, original email-only voicemail behavior
-- `SIP_DOMAIN` set (default): incoming calls ring SIP client first, fall back to voicemail+email if unanswered; outbound calls from SIP client work
+- `SIP_DOMAIN` set (default): incoming calls ring the SIP client registered for that number, fall back to voicemail+email if unanswered; outbound calls from SIP client work
 - `SIP_DOMAIN` set + `SIP_INBOUND=false`: outbound SIP calls only; incoming calls go straight to voicemail+email
 
 Key Features of This Setup
@@ -144,7 +152,7 @@ Voice Calls (With SIP)
 
 When someone calls your Twilio number and SIP is configured:
 
-- The call rings your SIP client (e.g. Zoiper) for the configured timeout
+- The call rings the SIP client registered for that specific number (using the called number as the SIP username)
 - If answered: two-way audio conversation proceeds normally
 - If unanswered (busy, no answer, offline): the caller hears a greeting and can leave a voicemail, which is emailed as above
 
@@ -154,8 +162,9 @@ Outbound Calls (SIP)
 When you dial from your SIP client:
 
 - The SIP domain webhook routes the call to `sip-outbound`
-- The destination number and caller ID are extracted from the SIP URI
-- The call is bridged to the PSTN number with your Twilio number as caller ID
+- The destination number is extracted from the SIP `To` URI
+- The caller ID is extracted from the SIP `From` URI (your Twilio number, which is the SIP username)
+- The call is bridged to the PSTN number with that Twilio number as caller ID
 
 SMS Messages
 -------

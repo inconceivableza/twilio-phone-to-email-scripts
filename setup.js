@@ -486,6 +486,8 @@ async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
   const globalEmail = cliArgs.forwardingEmail || state.env.FORWARDING_EMAIL || '';
   const globalSmsForward = state.env.SMS_FORWARD_NUMBER || '';
   const globalAnswerName = state.env.ANSWER_MESSAGE_NAME || '';
+  const globalAnswerUrl = state.env.ANSWER_MESSAGE_URL || '';
+  const globalThankYouUrl = state.env.THANK_YOU_MESSAGE_URL || '';
 
   if (!nonInteractive) {
     print('For each number, configure per-number settings.');
@@ -509,6 +511,14 @@ async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
         '  Answer message name',
         existing.answerMessageName || globalAnswerName || ''
       );
+      const answerUrl = await ask(
+        '  Answer message audio URL or asset path (e.g. /greeting.mp3)',
+        existing.answerMessageUrl || ''
+      );
+      const thankYouUrl = await ask(
+        '  Thank-you message audio URL or asset path (e.g. /thankyou.mp3)',
+        existing.thankYouMessageUrl || ''
+      );
       const vr = await ask(
         '  Voice region (us1 or ie1)',
         existing.voiceRegion || state.voiceRegion
@@ -522,6 +532,8 @@ async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
       if (email && email !== '(global)' && email !== globalEmail) cfg.forwardingEmail = email;
       if (smsForward && smsForward !== globalSmsForward) cfg.smsForwardNumber = smsForward;
       if (answerName && answerName !== globalAnswerName) cfg.answerMessageName = answerName;
+      if (answerUrl && answerUrl !== globalAnswerUrl) cfg.answerMessageUrl = answerUrl;
+      if (thankYouUrl && thankYouUrl !== globalThankYouUrl) cfg.thankYouMessageUrl = thankYouUrl;
       if (vr && vr !== state.voiceRegion) cfg.voiceRegion = vr;
       if (sr && sr !== state.smsRegion) cfg.smsRegion = sr;
 

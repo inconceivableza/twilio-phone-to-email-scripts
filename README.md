@@ -49,11 +49,14 @@ Each phone number can have its own settings in `assets/phone-config.private.json
     "forwardingEmail": "alice@example.com",
     "smsForwardNumber": "+353861234567",
     "answerMessageName": "Alice",
+    "answerMessageUrl": "/greeting-alice.mp3",
+    "thankYouMessageUrl": "/thankyou-alice.mp3",
     "voiceRegion": "ie1",
     "smsRegion": "ie1"
   },
   "+15559876543": {
     "forwardingEmail": "bob@example.com",
+    "answerMessageUrl": "https://example.com/bob-greeting.mp3",
     "voiceRegion": "us1",
     "smsRegion": "us1"
   }
@@ -107,9 +110,10 @@ Step 2: Add Voice Recordings (Optional)
 
 If you would like personalized greetings, record a message asking the caller to leave a message, and/or one thanking them for their message:
 - Use your own software to record the messages and save them as MP3 files
-- In your Twilio dashboard, navigate to "Functions and Assets" > "Assets"
-- Upload the mp3 files as public assets.
-- You can copy the URLs from here to fill in environment variables that will use these files later.
+- Place the files in the `assets/` directory of this project (e.g. `assets/greeting-alice.mp3`). They will be deployed alongside the functions.
+- In `phone-config.private.json`, set `answerMessageUrl` and/or `thankYouMessageUrl` per number using asset paths (e.g. `"/greeting-alice.mp3"`)
+- Alternatively, upload files to any public URL or to Twilio's dashboard under "Functions and Assets" > "Assets", and use the full URL instead
+- Global defaults can be set via the `ANSWER_MESSAGE_URL` and `THANK_YOU_MESSAGE_URL` environment variables
 
 Step 3: Deploy with the Twilio CLI
 -------

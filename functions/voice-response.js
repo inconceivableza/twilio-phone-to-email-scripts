@@ -1,3 +1,9 @@
+function resolveAssetUrl(context, url) {
+  if (!url) return null;
+  if (url.startsWith('/')) return `https://${context.DOMAIN_NAME}${url}`;
+  return url;
+}
+
 function getNumberConfig(toNumber) {
   try {
     const asset = Runtime.getAssets()['/phone-config.json'];
@@ -30,9 +36,10 @@ exports.handler = function(context, event, callback) {
     dial.sip(sipUri);
   } else if (emailConfigured) {
     // Voicemail path — only if email is configured to deliver the message
-    if (context.ANSWER_MESSAGE_URL) {
+    const answerUrl = resolveAssetUrl(context, numberConfig.answerMessageUrl || context.ANSWER_MESSAGE_URL);
+    if (answerUrl) {
       console.log("Playing audio answer message");
-      twiml.play(context.ANSWER_MESSAGE_URL);
+      twiml.play(answerUrl);
     } else {
       console.log("Generating audio answer speech");
       const name = numberConfig.answerMessageName || context.ANSWER_MESSAGE_NAME || 'us';

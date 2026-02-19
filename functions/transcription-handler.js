@@ -54,9 +54,23 @@ function getAttachmentData(recordingUrl, accountSid, authToken) {
   });
 }
 
+function getNumberConfig(toNumber) {
+  try {
+    const asset = Runtime.getAssets()['/phone-config.json'];
+    if (asset) {
+      return JSON.parse(asset.open())[toNumber] || {};
+    }
+  } catch (e) { /* config missing or invalid */ }
+  return {};
+}
+
 exports.handler = function(context, event, callback) {
   // Only proceed if transcription is complete
   if (event.TranscriptionStatus === 'completed') {
+    const toNumber = event.To || 'Unknown';
+    const numberConfig = getNumberConfig(toNumber);
+    const forwardingEmail = numberConfig.forwardingEmail || context.FORWARDING_EMAIL;
+
     // Initialize Mailjet
     const mailjetClient = mailjet.apiConnect(
       context.MAILJET_API_KEY,
@@ -66,7 +80,6 @@ exports.handler = function(context, event, callback) {
     const transcriptionText = event.TranscriptionText || 'No transcription available';
     const recordingUrl = event.RecordingUrl || '';
     const fromNumber = event.From || 'Unknown';
-    const toNumber = event.To || 'Unknown';
     // console.log("Transcription event information follows:");
     // JSON.stringify(event, null, 4).split('\n').forEach(line => console.log(line));
     const dateTimeStr = getFormattedDateTime();
@@ -86,7 +99,7 @@ exports.handler = function(context, event, callback) {
               },
               To: [
                 {
-                  Email: context.FORWARDING_EMAIL,
+                  Email: forwardingEmail,
                   Name: "Recipient"
                 }
               ],

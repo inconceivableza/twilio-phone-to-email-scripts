@@ -1,10 +1,21 @@
+function getNumberConfig(toNumber) {
+  try {
+    const asset = Runtime.getAssets()['/phone-config.json'];
+    if (asset) {
+      return JSON.parse(asset.open())[toNumber] || {};
+    }
+  } catch (e) { /* config missing or invalid */ }
+  return {};
+}
+
 exports.handler = function(context, event, callback) {
   const twiml = new Twilio.twiml.VoiceResponse();
+  const numberConfig = getNumberConfig(event.To);
   const status = event.DialCallStatus;
   console.log(`SIP dial result: ${status}`);
 
   const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
-    && context.FROM_EMAIL && context.FORWARDING_EMAIL;
+    && context.FROM_EMAIL && (numberConfig.forwardingEmail || context.FORWARDING_EMAIL);
 
   if (status === 'completed') {
     // Call was answered and has ended; nothing more to do
@@ -16,7 +27,7 @@ exports.handler = function(context, event, callback) {
       twiml.play(context.ANSWER_MESSAGE_URL);
     } else {
       console.log("Generating audio answer speech");
-      const name = context.ANSWER_MESSAGE_NAME || 'us';
+      const name = numberConfig.answerMessageName || context.ANSWER_MESSAGE_NAME || 'us';
       twiml.say('Thank you for calling ' + name + '. Please leave a message after the tone. Press star when finished.');
     }
 

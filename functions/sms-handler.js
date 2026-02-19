@@ -1,8 +1,22 @@
 const mailjet = require('node-mailjet');
 
+function getNumberConfig(toNumber) {
+  try {
+    const asset = Runtime.getAssets()['/phone-config.json'];
+    if (asset) {
+      return JSON.parse(asset.open())[toNumber] || {};
+    }
+  } catch (e) { /* config missing or invalid */ }
+  return {};
+}
+
 exports.handler = function(context, event, callback) {
+  const numberConfig = getNumberConfig(event.To);
+  const forwardingEmail = numberConfig.forwardingEmail || context.FORWARDING_EMAIL;
+  const smsForwardNumber = numberConfig.smsForwardNumber || context.SMS_FORWARD_NUMBER;
+
   const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
-    && context.FROM_EMAIL && context.FORWARDING_EMAIL;
+    && context.FROM_EMAIL && forwardingEmail;
 
   const promises = [];
 
@@ -22,7 +36,7 @@ exports.handler = function(context, event, callback) {
           },
           To: [
             {
-              Email: context.FORWARDING_EMAIL,
+              Email: forwardingEmail,
               Name: "Recipient"
             }
           ],
@@ -45,14 +59,14 @@ exports.handler = function(context, event, callback) {
   }
 
   // Optionally forward the SMS to another phone number
-  if (context.SMS_FORWARD_NUMBER) {
+  if (smsForwardNumber) {
     promises.push(
       context.getTwilioClient().messages.create({
-        to: context.SMS_FORWARD_NUMBER,
+        to: smsForwardNumber,
         from: event.To,
         body: `SMS from ${event.From}:\n${event.Body}`
       }).then(() => {
-        console.log(`SMS forwarded to ${context.SMS_FORWARD_NUMBER}`);
+        console.log(`SMS forwarded to ${smsForwardNumber}`);
       })
     );
   }

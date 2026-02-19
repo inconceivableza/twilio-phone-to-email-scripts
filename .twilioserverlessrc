@@ -1,0 +1,8 @@
+{
+  "commands": {
+    "deploy": {
+      "functionsFolder": "functions",
+      "assetsFolder": "assets"
+    }
+  }
+}

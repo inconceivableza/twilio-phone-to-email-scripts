@@ -1,0 +1,20 @@
+{
+  "name": "twilio-phone-to-email",
+  "version": "1.0.0",
+  "description": "Twilio Functions for voicemail capture, transcription, email forwarding, SMS forwarding, and SIP softphone support",
+  "scripts": {
+    "setup": "node setup.js",
+    "deploy": "twilio serverless:deploy"
+  },
+  "dependencies": {
+    "node-mailjet": "^6.0.2",
+    "axios": "^1.3.6"
+  },
+  "devDependencies": {
+    "twilio": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

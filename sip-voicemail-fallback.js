@@ -3,11 +3,14 @@ exports.handler = function(context, event, callback) {
   const status = event.DialCallStatus;
   console.log(`SIP dial result: ${status}`);
 
+  const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
+    && context.FROM_EMAIL && context.FORWARDING_EMAIL;
+
   if (status === 'completed') {
     // Call was answered and has ended; nothing more to do
     twiml.hangup();
-  } else {
-    // SIP unavailable (busy, no-answer, failed, canceled) — fall back to voicemail
+  } else if (emailConfigured) {
+    // SIP unavailable — fall back to voicemail (only if email is configured)
     if (context.ANSWER_MESSAGE_URL) {
       console.log("Playing audio answer message");
       twiml.play(context.ANSWER_MESSAGE_URL);
@@ -25,6 +28,11 @@ exports.handler = function(context, event, callback) {
       transcribe: true,
       finishOnKey: '*'
     });
+  } else {
+    // No email configured — cannot take a message
+    console.log("No email configured; not taking a message");
+    twiml.say('Sorry, we are unable to take your call right now. Please try again later.');
+    twiml.hangup();
   }
 
   callback(null, twiml);

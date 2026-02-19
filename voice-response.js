@@ -2,6 +2,8 @@ exports.handler = function(context, event, callback) {
   const twiml = new Twilio.twiml.VoiceResponse();
 
   const sipEnabled = context.SIP_DOMAIN && context.SIP_INBOUND !== 'false';
+  const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
+    && context.FROM_EMAIL && context.FORWARDING_EMAIL;
 
   if (sipEnabled) {
     // Ring the SIP client first; if unanswered, fall back to voicemail
@@ -15,8 +17,8 @@ exports.handler = function(context, event, callback) {
       callerId: event.From
     });
     dial.sip(sipUri);
-  } else {
-    // Voicemail-only path (original behavior)
+  } else if (emailConfigured) {
+    // Voicemail path — only if email is configured to deliver the message
     if (context.ANSWER_MESSAGE_URL) {
       console.log("Playing audio answer message");
       twiml.play(context.ANSWER_MESSAGE_URL);
@@ -34,6 +36,11 @@ exports.handler = function(context, event, callback) {
       transcribe: true,
       finishOnKey: '*'
     });
+  } else {
+    // No SIP and no email configured — cannot take a message
+    console.log("No email configured; not taking a message");
+    twiml.say('Sorry, we are unable to take your call right now. Please try again later.');
+    twiml.hangup();
   }
 
   callback(null, twiml);

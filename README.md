@@ -27,7 +27,7 @@ Step 3: Create a Twilio Functions Service
 -------
 
 - Navigate to "Functions and Assets" > "Services" in your Twilio dashboard
-- Click "Create Service" and give it a name (e.g., "Voicemail Forwarding")
+- Click "Create Service" and give it a name (e.g., "phone-handling")
 
 Step 4: Add the Functions to Your Service
 -------

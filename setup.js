@@ -818,15 +818,36 @@ async function step5_email(state, cliArgs, nonInteractive) {
     print('Note: voicemail recordings will not be delivered without email configured.');
   }
 
-  // Also prompt for answer message / thank you message URLs
+  // Also prompt for answer message / thank you message URLs — but skip any
+  // parameter that every phone number already has configured per-number,
+  // since the global value would never be used at runtime.
   if (!nonInteractive) {
-    print('');
-    const answerUrl = await ask('Answer message audio URL (optional)', state.env.ANSWER_MESSAGE_URL || '');
-    const answerName = await ask('Answer message name (default greeting name)', state.env.ANSWER_MESSAGE_NAME || '');
-    const thankYouUrl = await ask('Thank-you message audio URL (optional)', state.env.THANK_YOU_MESSAGE_URL || '');
-    state.env.ANSWER_MESSAGE_URL = answerUrl;
-    state.env.ANSWER_MESSAGE_NAME = answerName;
-    state.env.THANK_YOU_MESSAGE_URL = thankYouUrl;
+    const allNumbersHave = (field) =>
+      state.numbers.length > 0 &&
+      state.numbers.every(n => {
+        const cfg = state.numberConfigs[n.number];
+        return cfg && cfg[field];
+      });
+
+    const needAnswerUrl = !allNumbersHave('answerMessageUrl');
+    const needAnswerName = !allNumbersHave('answerMessageName');
+    const needThankYouUrl = !allNumbersHave('thankYouMessageUrl');
+
+    if (needAnswerUrl || needAnswerName || needThankYouUrl) {
+      print('');
+      if (needAnswerUrl) {
+        const answerUrl = await ask('Answer message audio URL (optional)', state.env.ANSWER_MESSAGE_URL || '');
+        state.env.ANSWER_MESSAGE_URL = answerUrl;
+      }
+      if (needAnswerName) {
+        const answerName = await ask('Answer message name (default greeting name)', state.env.ANSWER_MESSAGE_NAME || '');
+        state.env.ANSWER_MESSAGE_NAME = answerName;
+      }
+      if (needThankYouUrl) {
+        const thankYouUrl = await ask('Thank-you message audio URL (optional)', state.env.THANK_YOU_MESSAGE_URL || '');
+        state.env.THANK_YOU_MESSAGE_URL = thankYouUrl;
+      }
+    }
   }
 }
 

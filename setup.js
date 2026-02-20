@@ -2,7 +2,7 @@
 'use strict';
 
 const readline = require('readline');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const {
   HELP_TEXT, REGIONS, VALID_REGIONS,
@@ -1300,15 +1300,19 @@ async function step8_deploy(state, nonInteractive) {
     }
 
     try {
-      const result = spawnSync(TWILIO_BIN, ['serverless:deploy'], {
-        cwd: __dirname,
-        env: envVars,
-        stdio: ['inherit', 'pipe', 'pipe'],
-        encoding: 'utf8',
+      // Use async spawn so output streams to the terminal in real-time
+      const { exitCode, output } = await new Promise((resolve, reject) => {
+        const child = spawn(TWILIO_BIN, ['serverless:deploy'], {
+          cwd: __dirname,
+          env: envVars,
+          stdio: ['inherit', 'pipe', 'pipe'],
+        });
+        const chunks = [];
+        child.stdout.on('data', (d) => { process.stdout.write(d); chunks.push(d); });
+        child.stderr.on('data', (d) => { process.stderr.write(d); chunks.push(d); });
+        child.on('error', reject);
+        child.on('close', (code) => resolve({ exitCode: code, output: Buffer.concat(chunks).toString('utf8') }));
       });
-
-      const output = (result.stdout || '') + (result.stderr || '');
-      print(output);
 
       // Extract the deployment URL from output
       const urlMatch = output.match(/https:\/\/[\w-]+\.twil\.io/);
@@ -1324,8 +1328,8 @@ async function step8_deploy(state, nonInteractive) {
         }
       }
 
-      if (result.status !== 0) {
-        print(`Warning: deployment to ${region} exited with code ${result.status}`);
+      if (exitCode !== 0) {
+        print(`Warning: deployment to ${region} exited with code ${exitCode}`);
       }
     } catch (e) {
       print(`Error deploying to ${region}: ${e.message}`);

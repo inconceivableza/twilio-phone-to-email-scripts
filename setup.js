@@ -89,6 +89,13 @@ function print(text) {
   console.log(text);
 }
 
+function formatCredentialError(res) {
+  let msg = res.error || 'Unknown error';
+  if (res.code) msg += ` (code ${res.code})`;
+  if (res.status) msg += ` [HTTP ${res.status}]`;
+  return msg;
+}
+
 function printBanner(title) {
   print(`\n${'='.repeat(60)}`);
   print(`  ${title}`);
@@ -226,18 +233,41 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
     }
   }
 
-  // Prompt for missing secrets on entries that have an API key SID but no secret
+  // Prompt for missing secrets and validate each region's credentials
   if (!nonInteractive) {
     for (const region of Object.keys(state.regionalCredentials)) {
       const creds = state.regionalCredentials[region];
       if (creds.apiKeySid && !creds.apiKeySecret && !creds.authToken) {
-        print(`\nAPI Key SID found for ${region}: ${creds.apiKeySid}`);
-        const confirmedSid = await ask(`  Confirm API Key SID for ${region}`, creds.apiKeySid);
-        creds.apiKeySid = confirmedSid;
-        creds.apiKeySecret = await askSecret(`  API Key Secret for ${region}`);
-        if (!creds.apiKeySecret) {
-          print(`  No secret provided — removing ${region} credentials.`);
-          delete state.regionalCredentials[region];
+        // Have an API key SID but no secret — confirm SID and ask for secret
+        let valid = false;
+        while (!valid) {
+          print(`\nAPI Key SID found for ${region}: ${creds.apiKeySid}`);
+          const confirmedSid = await ask(`  Confirm API Key SID for ${region}`, creds.apiKeySid);
+          creds.apiKeySid = confirmedSid;
+          creds.apiKeySecret = await askSecret(`  API Key Secret for ${region}`);
+          if (!creds.apiKeySecret) {
+            print(`  No secret provided — removing ${region} credentials.`);
+            delete state.regionalCredentials[region];
+            break;
+          }
+          print(`  Validating credentials for ${region}...`);
+          const res = await validateCredentials({
+            accountSid: sid, apiKeySid: creds.apiKeySid,
+            apiKeySecret: creds.apiKeySecret, region,
+          });
+          if (res.valid) {
+            print(`  ${region}: valid (${res.friendlyName})`);
+            creds._validated = true;
+            valid = true;
+          } else {
+            print(`  ${region}: ${formatCredentialError(res)}`);
+            const retry = await ask('  Try again? (y/n)', 'y');
+            if (retry.toLowerCase() !== 'y') {
+              print(`  Removing ${region} credentials.`);
+              delete state.regionalCredentials[region];
+              break;
+            }
+          }
         }
       }
     }
@@ -250,57 +280,58 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
       process.exit(1);
     }
 
-    print('\nProvide credentials for your first region.\n');
-    const authType = await ask('Use API key (k) or Auth Token (t)?', 'k');
+    let valid = false;
+    while (!valid) {
+      print('\nProvide credentials for your first region.\n');
+      const authType = await ask('Use API key (k) or Auth Token (t)?', 'k');
 
-    let region;
-    if (authType.toLowerCase() === 't') {
-      const token = await askSecret('Auth Token');
-      region = await ask('Region for this token', 'us1');
-      if (!VALID_REGIONS.includes(region)) {
-        print(`Warning: "${region}" is not recognized, using us1.`);
-        region = 'us1';
+      let region;
+      if (authType.toLowerCase() === 't') {
+        const token = await askSecret('Auth Token');
+        region = await ask('Region for this token', 'us1');
+        if (!VALID_REGIONS.includes(region)) {
+          print(`Warning: "${region}" is not recognized, using us1.`);
+          region = 'us1';
+        }
+        state.regionalCredentials[region] = { authToken: token };
+      } else {
+        const keySid = await ask('API Key SID');
+        const keySecret = await askSecret('API Key Secret');
+        region = await ask('Region for this key', 'us1');
+        if (!VALID_REGIONS.includes(region)) {
+          print(`Warning: "${region}" is not recognized, using us1.`);
+          region = 'us1';
+        }
+        state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
       }
-      state.regionalCredentials[region] = { authToken: token };
-    } else {
-      const keySid = await ask('API Key SID');
-      const keySecret = await askSecret('API Key Secret');
-      region = await ask('Region for this key', 'us1');
-      if (!VALID_REGIONS.includes(region)) {
-        print(`Warning: "${region}" is not recognized, using us1.`);
-        region = 'us1';
+
+      print(`\nValidating credentials for ${region}...`);
+      const res = await validateCredentials({
+        accountSid: sid,
+        apiKeySid: (state.regionalCredentials[region] || {}).apiKeySid,
+        apiKeySecret: (state.regionalCredentials[region] || {}).apiKeySecret,
+        authToken: (state.regionalCredentials[region] || {}).authToken,
+        region,
+      });
+
+      if (res.valid) {
+        print(`Authenticated as: ${res.friendlyName}`);
+        state.initialRegion = region;
+        valid = true;
+      } else {
+        print(`Invalid credentials for ${region}: ${formatCredentialError(res)}`);
+        delete state.regionalCredentials[region];
       }
-      state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
     }
-
-    state.initialRegion = region;
   } else {
     state.initialRegion = existingRegions[0];
   }
 
-  // Validate initial credentials
-  const initRegion = state.initialRegion;
-  const initCreds = state.regionalCredentials[initRegion];
-
-  print(`\nValidating credentials for ${initRegion}...`);
-  const result = await validateCredentials({
-    accountSid: sid,
-    apiKeySid: initCreds.apiKeySid,
-    apiKeySecret: initCreds.apiKeySecret,
-    authToken: initCreds.authToken,
-    region: initRegion,
-  });
-
-  if (!result.valid) {
-    print(`Error: Invalid credentials for ${initRegion} — ${result.error}`);
-    process.exit(1);
-  }
-  print(`Authenticated as: ${result.friendlyName}\n`);
-
-  // Validate any other pre-resolved credentials
+  // Validate pre-resolved credentials that haven't been validated yet
+  // (ones that had both SID+secret from config, or auth tokens)
   for (const region of Object.keys(state.regionalCredentials)) {
-    if (region === initRegion) continue;
     const creds = state.regionalCredentials[region];
+    if (creds._validated) continue;
     print(`Validating credentials for ${region}...`);
     const res = await validateCredentials({
       accountSid: sid,
@@ -310,10 +341,49 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
       region,
     });
     if (res.valid) {
-      print(`  ${region}: valid`);
+      print(`  ${region}: valid (${res.friendlyName})`);
     } else {
-      print(`  ${region}: invalid — ${res.error} (removing)`);
-      delete state.regionalCredentials[region];
+      print(`  ${region}: ${formatCredentialError(res)}`);
+      if (!nonInteractive) {
+        const retry = await ask(`  Re-enter credentials for ${region}? (y/n)`, 'y');
+        if (retry.toLowerCase() === 'y') {
+          let retryValid = false;
+          while (!retryValid) {
+            const authType = await ask(`  Use API key (k) or Auth Token (t) for ${region}?`, 'k');
+            if (authType.toLowerCase() === 't') {
+              const token = await askSecret(`  Auth Token for ${region}`);
+              state.regionalCredentials[region] = { authToken: token };
+            } else {
+              const keySid = await ask(`  API Key SID for ${region}`, creds.apiKeySid || '');
+              const keySecret = await askSecret(`  API Key Secret for ${region}`);
+              state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
+            }
+            print(`  Validating credentials for ${region}...`);
+            const res2 = await validateCredentials({
+              accountSid: sid,
+              apiKeySid: (state.regionalCredentials[region]).apiKeySid,
+              apiKeySecret: (state.regionalCredentials[region]).apiKeySecret,
+              authToken: (state.regionalCredentials[region]).authToken,
+              region,
+            });
+            if (res2.valid) {
+              print(`  ${region}: valid (${res2.friendlyName})`);
+              retryValid = true;
+            } else {
+              print(`  ${region}: ${formatCredentialError(res2)}`);
+              const again = await ask('  Try again? (y/n)', 'y');
+              if (again.toLowerCase() !== 'y') {
+                delete state.regionalCredentials[region];
+                break;
+              }
+            }
+          }
+        } else {
+          delete state.regionalCredentials[region];
+        }
+      } else {
+        delete state.regionalCredentials[region];
+      }
     }
   }
 }

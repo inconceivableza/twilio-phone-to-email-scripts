@@ -1258,6 +1258,24 @@ async function step8_deploy(state, nonInteractive) {
     return;
   }
 
+  // Ensure required CLI plugins are installed
+  const requiredPlugins = [
+    '@twilio-labs/plugin-serverless',
+    '@twilio-labs/plugin-assets',
+  ];
+  for (const plugin of requiredPlugins) {
+    const check = spawnSync(TWILIO_BIN, ['plugins'], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (!(check.stdout || '').includes(plugin)) {
+      print(`Installing Twilio CLI plugin: ${plugin}...`);
+      spawnSync(TWILIO_BIN, ['plugins:install', plugin], {
+        stdio: 'inherit',
+      });
+    }
+  }
+
   if (!nonInteractive) {
     const proceed = await ask('Deploy now? (y/n)', 'y');
     if (proceed.toLowerCase() !== 'y') {

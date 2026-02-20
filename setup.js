@@ -93,6 +93,9 @@ function formatCredentialError(res) {
   let msg = res.error || 'Unknown error';
   if (res.code) msg += ` (code ${res.code})`;
   if (res.status) msg += ` [HTTP ${res.status}]`;
+  if (res.domain) msg += `\n    Request to: ${res.domain}`;
+  if (res.accountSid) msg += `\n    Account SID: ${res.accountSid}`;
+  if (res.authMethod) msg += `\n    Auth: ${res.authMethod}`;
   return msg;
 }
 
@@ -316,6 +319,7 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
 
       if (res.valid) {
         print(`Authenticated as: ${res.friendlyName}`);
+        state.regionalCredentials[region]._validated = true;
         state.initialRegion = region;
         valid = true;
       } else {
@@ -624,40 +628,48 @@ async function step3_regions(state, cliArgs, nonInteractive) {
     print(`\nCredentials needed for ${region}.`);
     print(`Create an API key at the Twilio Console for ${region}.`);
 
-    const authType = await ask(`  Use API key (k) or Auth Token (t) for ${region}?`, 'k');
-    if (authType.toLowerCase() === 't') {
-      const token = await askSecret(`  Auth Token for ${region}`);
-      if (!token) {
-        print(`  Skipping ${region} — numbers in this region will fall back.`);
-        continue;
+    let regionValid = false;
+    while (!regionValid) {
+      const authType = await ask(`  Use API key (k) or Auth Token (t) for ${region}?`, 'k');
+      if (authType.toLowerCase() === 't') {
+        const token = await askSecret(`  Auth Token for ${region}`);
+        if (!token) {
+          print(`  Skipping ${region} — numbers in this region will fall back.`);
+          break;
+        }
+        state.regionalCredentials[region] = { authToken: token };
+      } else {
+        const keySid = await ask(`  API Key SID for ${region}`);
+        const keySecret = await askSecret(`  API Key Secret for ${region}`);
+        if (!keySid || !keySecret) {
+          print(`  Skipping ${region} — numbers in this region will fall back.`);
+          break;
+        }
+        state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
       }
-      state.regionalCredentials[region] = { authToken: token };
-    } else {
-      const keySid = await ask(`  API Key SID for ${region}`);
-      const keySecret = await askSecret(`  API Key Secret for ${region}`);
-      if (!keySid || !keySecret) {
-        print(`  Skipping ${region} — numbers in this region will fall back.`);
-        continue;
-      }
-      state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
-    }
 
-    // Validate
-    const creds = state.regionalCredentials[region];
-    print(`  Validating credentials for ${region}...`);
-    const res = await validateCredentials({
-      accountSid: state.accountSid,
-      apiKeySid: creds.apiKeySid,
-      apiKeySecret: creds.apiKeySecret,
-      authToken: creds.authToken,
-      region,
-    });
-    if (res.valid) {
-      print(`  ${region}: valid`);
-    } else {
-      print(`  ${region}: invalid — ${res.error}`);
-      delete state.regionalCredentials[region];
-      print(`  Numbers using ${region} will need to fall back to another region.`);
+      // Validate
+      const creds = state.regionalCredentials[region];
+      print(`  Validating credentials for ${region}...`);
+      const res = await validateCredentials({
+        accountSid: state.accountSid,
+        apiKeySid: creds.apiKeySid,
+        apiKeySecret: creds.apiKeySecret,
+        authToken: creds.authToken,
+        region,
+      });
+      if (res.valid) {
+        print(`  ${region}: valid (${res.friendlyName})`);
+        regionValid = true;
+      } else {
+        print(`  ${region}: ${formatCredentialError(res)}`);
+        delete state.regionalCredentials[region];
+        const retry = await ask('  Try again? (y/n)', 'y');
+        if (retry.toLowerCase() !== 'y') {
+          print(`  Numbers using ${region} will need to fall back to another region.`);
+          break;
+        }
+      }
     }
   }
 

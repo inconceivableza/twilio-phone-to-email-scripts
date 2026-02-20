@@ -42,30 +42,37 @@ function ask(question, defaultVal) {
 function askSecret(question, defaultVal) {
   const suffix = defaultVal ? ' [****]' : '';
   return new Promise(resolve => {
-    rl.pause();
+    // Close readline entirely so its stdin listeners can't echo input
+    if (rl) { rl.close(); rl = null; }
+
     process.stdout.write(`${question}${suffix}: `);
-    const { stdin } = process;
+    const stdin = process.stdin;
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding('utf8');
     let input = '';
-    const onData = (ch) => {
-      if (ch === '\r' || ch === '\n') {
-        stdin.removeListener('data', onData);
-        stdin.setRawMode(false);
-        process.stdout.write('\n');
-        rl.resume();
-        resolve(input.trim() || defaultVal || '');
-      } else if (ch === '\u007f' || ch === '\b') {
-        if (input.length > 0) {
-          input = input.slice(0, -1);
-          process.stdout.write('\b \b');
+    const onData = (data) => {
+      // Iterate over each character — paste delivers multiple at once
+      for (const ch of data) {
+        if (ch === '\r' || ch === '\n') {
+          stdin.removeListener('data', onData);
+          stdin.setRawMode(false);
+          stdin.pause();
+          process.stdout.write('\n');
+          initReadline();
+          resolve(input.trim() || defaultVal || '');
+          return;
+        } else if (ch === '\u007f' || ch === '\b') {
+          if (input.length > 0) {
+            input = input.slice(0, -1);
+            process.stdout.write('\b \b');
+          }
+        } else if (ch === '\u0003') {
+          process.exit(1);
+        } else {
+          input += ch;
+          process.stdout.write('*');
         }
-      } else if (ch === '\u0003') {
-        process.exit(1);
-      } else {
-        input += ch;
-        process.stdout.write('*');
       }
     };
     stdin.on('data', onData);

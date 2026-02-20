@@ -945,6 +945,7 @@ async function step6_sip(state, cliArgs, nonInteractive) {
       print('\nSIP: disabled\n');
       state.sipEnabled = false;
       state.env.SIP_DOMAIN = '';
+      state.env.SIP_DOMAIN_SID = '';
       return;
     }
 
@@ -1008,11 +1009,12 @@ async function step6_sip(state, cliArgs, nonInteractive) {
       state.sipDomainSid = domain.sid;
     } catch (e) {
       if (/already exists/i.test(e.message)) {
-        // Domain exists but wasn't found via the list API (can happen with
-        // API-key credentials).  On a re-run the credential mappings and
-        // webhooks from the previous run are still in place, so it's safe
-        // to continue without the SID.
         print(`SIP domain ${fullDomain} already exists.`);
+        // Use saved SID from a previous run if the list API can't find it
+        if (state.env.SIP_DOMAIN_SID) {
+          state.sipDomainSid = state.env.SIP_DOMAIN_SID;
+          print(`Using saved SIP domain SID: ${state.sipDomainSid}`);
+        }
       } else {
         print(`Error creating SIP domain: ${e.message}`);
         print('You may need to create it manually in the Twilio console.');
@@ -1020,6 +1022,11 @@ async function step6_sip(state, cliArgs, nonInteractive) {
         return;
       }
     }
+  }
+
+  // Persist the SID so it's available on re-runs
+  if (state.sipDomainSid) {
+    state.env.SIP_DOMAIN_SID = state.sipDomainSid;
   }
 
   // Create or find credential list

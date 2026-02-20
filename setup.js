@@ -1333,7 +1333,7 @@ async function step8_deploy(state, nonInteractive) {
       });
 
       // Extract the deployment URL from output
-      const urlMatch = output.match(/https:\/\/[\w-]+\.twil\.io/);
+      const urlMatch = output.match(/https:\/\/[\w.-]+\.twil\.io/);
       if (urlMatch) {
         state.deployUrls[region] = urlMatch[0];
         print(`Deployment URL for ${region}: ${state.deployUrls[region]}`);

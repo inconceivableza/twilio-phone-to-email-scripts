@@ -14,7 +14,7 @@ const {
 } = require('./lib/config');
 
 const {
-  getTwilioClient, getClientForRegion, getAnyClient,
+  TWILIO_BIN, getTwilioClient, getClientForRegion, getAnyClient,
   validateCredentials, listPhoneNumbers, listServerlessServices,
   listSipDomains, resolveRegionalCredentials, checkTwilioCli,
   getDeployedUrl,
@@ -1253,8 +1253,7 @@ async function step8_deploy(state, nonInteractive) {
   const cliAvailable = checkTwilioCli();
   if (!cliAvailable) {
     print('The Twilio CLI is required for deployment but was not found.');
-    print('Install it with: npm install -g twilio-cli');
-    print('Then install the serverless plugin: twilio plugins:install @twilio-labs/plugin-serverless');
+    print('Install it with: npm install');
     print('\nAfter installing, run "npm run setup" again or deploy manually with "npm run deploy".\n');
     return;
   }
@@ -1301,7 +1300,7 @@ async function step8_deploy(state, nonInteractive) {
     }
 
     try {
-      const result = spawnSync('twilio', ['serverless:deploy'], {
+      const result = spawnSync(TWILIO_BIN, ['serverless:deploy'], {
         cwd: __dirname,
         env: envVars,
         stdio: ['inherit', 'pipe', 'pipe'],

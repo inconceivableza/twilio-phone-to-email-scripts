@@ -923,9 +923,16 @@ async function step6_sip(state, cliArgs, nonInteractive) {
     return;
   }
 
-  // Create or find existing SIP domain
+  // Create or find existing SIP domain — re-fetch with the regional client
+  // since the list from Step 2 may have been fetched with a different client.
   print('Checking for existing SIP domain...');
   let domain = state.existingSipDomains.find(d => d.domainName === fullDomain);
+  if (!domain) {
+    try {
+      const domains = await client.sip.domains.list();
+      domain = domains.find(d => d.domainName === fullDomain);
+    } catch { /* ignore — will attempt to create below */ }
+  }
 
   if (domain) {
     print(`Found existing SIP domain: ${domain.domainName} (${domain.sid})`);
@@ -941,10 +948,18 @@ async function step6_sip(state, cliArgs, nonInteractive) {
       print(`Created SIP domain: ${domain.domainName} (${domain.sid})`);
       state.sipDomainSid = domain.sid;
     } catch (e) {
-      print(`Error creating SIP domain: ${e.message}`);
-      print('You may need to create it manually in the Twilio console.');
-      state.sipEnabled = false;
-      return;
+      if (/already exists/i.test(e.message)) {
+        // Domain exists but wasn't found via the list API (can happen with
+        // API-key credentials).  On a re-run the credential mappings and
+        // webhooks from the previous run are still in place, so it's safe
+        // to continue without the SID.
+        print(`SIP domain ${fullDomain} already exists.`);
+      } else {
+        print(`Error creating SIP domain: ${e.message}`);
+        print('You may need to create it manually in the Twilio console.');
+        state.sipEnabled = false;
+        return;
+      }
     }
   }
 
@@ -966,21 +981,23 @@ async function step6_sip(state, cliArgs, nonInteractive) {
   }
 
   // Map credential list to domain (if not already)
-  try {
-    const mappings = await client.sip
-      .domains(state.sipDomainSid)
-      .auth.registrations.credentialListMappings.list();
-    const alreadyMapped = mappings.some(m => m.sid === credList.sid || m.credentialListSid === credList.sid);
-    if (!alreadyMapped) {
-      await client.sip
+  if (state.sipDomainSid) {
+    try {
+      const mappings = await client.sip
         .domains(state.sipDomainSid)
-        .auth.registrations.credentialListMappings.create({
-          credentialListSid: credList.sid,
-        });
-      print('Mapped credential list to SIP domain (registration).');
+        .auth.registrations.credentialListMappings.list();
+      const alreadyMapped = mappings.some(m => m.sid === credList.sid || m.credentialListSid === credList.sid);
+      if (!alreadyMapped) {
+        await client.sip
+          .domains(state.sipDomainSid)
+          .auth.registrations.credentialListMappings.create({
+            credentialListSid: credList.sid,
+          });
+        print('Mapped credential list to SIP domain (registration).');
+      }
+    } catch (e) {
+      print(`Note: Could not map credential list for registration: ${e.message}`);
     }
-  } catch (e) {
-    print(`Note: Could not map credential list for registration: ${e.message}`);
   }
 
   // Create credentials for each phone number

@@ -8,7 +8,7 @@ Twilio Serverless Functions that forward voicemails (with transcription and reco
 
 ## Instructions for Claude
 
-Never read the contents of any file matching *.private.json
+Never read the contents of any file matching *.private.json or .env or .secrets or data/country-regions.json
 
 ## Commands
 
@@ -56,9 +56,25 @@ Outbound SIP call → sip-outbound.js (extracts E.164 from SIP URI, bridges to P
 
 `getNumberConfig(toNumber)` and `resolveAssetUrl(context, url)` are duplicated in `voice-response.js`, `recording-handler.js`, `sip-voicemail-fallback.js`, and `sms-handler.js`. Changes to these helpers must be applied to each file.
 
+### Regional Client Architecture
+
+The setup wizard creates per-region Twilio API clients. Each region (us1, ie1, au1) requires its own credentials — either an API Key SID + Secret (recommended) or an Auth Token. Credentials are stored in `state.regionalCredentials` keyed by region ID.
+
+- `getTwilioClient({ accountSid, apiKeySid, apiKeySecret, authToken, region })` — creates and caches a client
+- `getClientForRegion(state, region)` — looks up credentials from state and returns a client
+- `getAnyClient(state)` — returns a client from the initial region or any available region
+
+Region metadata lives in `data/regions.json` (features, edges, status). Country code → region mapping is in `data/country-regions.json` (longest-prefix matching).
+
+### Credential Storage
+
+- `.env` holds non-secret config only (regions, email addresses, SIP settings)
+- `.secrets` (gitignored, mode 0600) holds credentials (ACCOUNT_SID, API_KEY_SID_*, API_KEY_SECRET_*, AUTH_TOKEN_*, MAILJET_API_KEY, MAILJET_API_SECRET)
+- Load priority: process.env > .secrets > .env
+
 ### Setup Wizard
 
-`setup.js` is a 10-step interactive wizard that handles the full provisioning lifecycle: credential validation, Twilio API discovery, region selection, per-number config, Mailjet setup, SIP domain/credential creation, config file generation, deployment, and webhook configuration. It supports `--non-interactive` mode with CLI flags.
+`setup.js` is a 10-step interactive wizard that handles the full provisioning lifecycle: credential validation (API keys or auth tokens per region), Twilio API discovery, consolidated region selection with auto-recommendations, per-number config, Mailjet setup, SIP domain/credential creation, config file generation (with secrets separation), regional deployment, and webhook configuration. It supports `--non-interactive` mode with CLI flags.
 
 ## Key Dependencies
 

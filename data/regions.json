@@ -1,0 +1,44 @@
+{
+  "us1": {
+    "name": "United States",
+    "location": "Virginia, USA",
+    "edge": "ashburn",
+    "status": "ga",
+    "features": {
+      "voice": true,
+      "sms": true,
+      "functions": true,
+      "sip": true,
+      "recording": true,
+      "transcription": true
+    }
+  },
+  "ie1": {
+    "name": "Ireland",
+    "location": "Dublin, Ireland",
+    "edge": "dublin",
+    "status": "ga",
+    "features": {
+      "voice": true,
+      "sms": false,
+      "functions": true,
+      "sip": true,
+      "recording": true,
+      "transcription": true
+    }
+  },
+  "au1": {
+    "name": "Australia",
+    "location": "Sydney, Australia",
+    "edge": "sydney",
+    "status": "ga",
+    "features": {
+      "voice": true,
+      "sms": false,
+      "functions": false,
+      "sip": true,
+      "recording": true,
+      "transcription": false
+    }
+  }
+}

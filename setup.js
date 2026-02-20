@@ -17,20 +17,30 @@ Usage: node setup.js [options]
 Interactive setup wizard for Twilio Phone-to-Email Functions.
 
 Options:
-  --account-sid <sid>         Twilio Account SID
-  --auth-token <token>        Twilio Auth Token
-  --voice-region <r>          Default voice region: us1 or ie1
-  --sms-region <r>            Default SMS region: us1 or ie1
-  --mailjet-key <key>         Mailjet API key (omit to skip email)
-  --mailjet-secret <secret>   Mailjet API secret
-  --forwarding-email <email>  Default forwarding email
-  --from-email <email>        Sender email address
-  --sip-domain-name <name>    SIP domain prefix (omit to skip SIP)
-  --sip-region <r>            SIP domain region: us1 or ie1
-  --skip-sip                  Skip SIP setup
-  --skip-deploy               Skip deployment step
-  --non-interactive           No prompts; all values from flags/env/.env
-  --help                      Show this help message
+  --account-sid <sid>            Twilio Account SID
+  --api-key-sid <sid>            API Key SID (for initial region)
+  --api-key-secret <secret>      API Key Secret (for initial region)
+  --api-key-region <r>           Region for the API key (default: us1)
+  --auth-token-us1 <token>       Auth Token for US1 region
+  --auth-token-ie1 <token>       Auth Token for IE1 region
+  --api-key-sid-us1 <sid>        API Key SID for US1
+  --api-key-secret-us1 <secret>  API Key Secret for US1
+  --api-key-sid-ie1 <sid>        API Key SID for IE1
+  --api-key-secret-ie1 <secret>  API Key Secret for IE1
+  --api-key-sid-au1 <sid>        API Key SID for AU1
+  --api-key-secret-au1 <secret>  API Key Secret for AU1
+  --voice-region <r>             Default voice region (us1, ie1, au1)
+  --sms-region <r>               Default SMS region (us1, ie1, au1)
+  --mailjet-key <key>            Mailjet API key (omit to skip email)
+  --mailjet-secret <secret>      Mailjet API secret
+  --forwarding-email <email>     Default forwarding email
+  --from-email <email>           Sender email address
+  --sip-domain-name <name>       SIP domain prefix (omit to skip SIP)
+  --sip-region <r>               SIP domain region
+  --skip-sip                     Skip SIP setup
+  --skip-deploy                  Skip deployment step
+  --non-interactive              No prompts; all values from flags/env/.env
+  --help                         Show this help message
 `.trim();
 
 function parseArgs(argv) {
@@ -45,7 +55,17 @@ function parseArgs(argv) {
     // key-value flags
     const map = {
       '--account-sid': 'accountSid',
-      '--auth-token': 'authToken',
+      '--api-key-sid': 'apiKeySid',
+      '--api-key-secret': 'apiKeySecret',
+      '--api-key-region': 'apiKeyRegion',
+      '--auth-token-us1': 'authTokenUs1',
+      '--auth-token-ie1': 'authTokenIe1',
+      '--api-key-sid-us1': 'apiKeySidUs1',
+      '--api-key-secret-us1': 'apiKeySecretUs1',
+      '--api-key-sid-ie1': 'apiKeySidIe1',
+      '--api-key-secret-ie1': 'apiKeySecretIe1',
+      '--api-key-sid-au1': 'apiKeySidAu1',
+      '--api-key-secret-au1': 'apiKeySecretAu1',
       '--voice-region': 'voiceRegion',
       '--sms-region': 'smsRegion',
       '--mailjet-key': 'mailjetKey',
@@ -63,17 +83,68 @@ function parseArgs(argv) {
 }
 
 // ---------------------------------------------------------------------------
-// Utility helpers
+// Static data & constants
 // ---------------------------------------------------------------------------
 
-const ENV_PATH = path.join(__dirname, '.env');
-const PHONE_CONFIG_PATH = path.join(__dirname, 'assets', 'phone-config.private.json');
-const VALID_REGIONS = ['us1', 'ie1'];
+const REGIONS = require('./data/regions.json');
+const COUNTRY_REGIONS = require('./data/country-regions.json');
+const VALID_REGIONS = Object.keys(REGIONS);
 
-function loadEnvFile() {
+const ENV_PATH = path.join(__dirname, '.env');
+const SECRETS_PATH = path.join(__dirname, '.secrets');
+const PHONE_CONFIG_PATH = path.join(__dirname, 'assets', 'phone-config.private.json');
+
+// ---------------------------------------------------------------------------
+// Region helpers
+// ---------------------------------------------------------------------------
+
+function getEdgeForRegion(regionId) {
+  const r = REGIONS[regionId];
+  return r ? r.edge : null;
+}
+
+function regionSupportsFeature(regionId, feature) {
+  const r = REGIONS[regionId];
+  return r && r.features && r.features[feature] === true;
+}
+
+function recommendRegion(phoneNumber, feature) {
+  // Extract country code digits from E.164 number (after the +)
+  const digits = phoneNumber.replace(/^\+/, '');
+
+  // Longest-prefix match
+  let bestMatch = null;
+  let bestLen = 0;
+  for (const prefix of Object.keys(COUNTRY_REGIONS)) {
+    if (prefix.startsWith('_')) continue;
+    if (digits.startsWith(prefix) && prefix.length > bestLen) {
+      bestMatch = prefix;
+      bestLen = prefix.length;
+    }
+  }
+
+  const candidates = bestMatch
+    ? COUNTRY_REGIONS[bestMatch]
+    : COUNTRY_REGIONS._default;
+
+  // Return first region that supports the needed feature
+  for (const region of candidates) {
+    if (regionSupportsFeature(region, feature)) {
+      return region;
+    }
+  }
+  // Fallback to us1
+  return 'us1';
+}
+
+// ---------------------------------------------------------------------------
+// File I/O helpers
+// ---------------------------------------------------------------------------
+
+function parseKeyValueFile(filePath) {
   const env = {};
-  if (!fs.existsSync(ENV_PATH)) return env;
-  const lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
+  if (!fs.existsSync(filePath)) return env;
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -86,6 +157,21 @@ function loadEnvFile() {
   return env;
 }
 
+function loadEnvFile() {
+  return parseKeyValueFile(ENV_PATH);
+}
+
+function loadSecretsFile() {
+  return parseKeyValueFile(SECRETS_PATH);
+}
+
+function loadAllConfig() {
+  // Priority: process.env > .secrets > .env
+  const envFile = loadEnvFile();
+  const secretsFile = loadSecretsFile();
+  return { ...envFile, ...secretsFile, ...process.env };
+}
+
 function loadPhoneConfig() {
   if (!fs.existsSync(PHONE_CONFIG_PATH)) return {};
   try {
@@ -93,19 +179,32 @@ function loadPhoneConfig() {
   } catch { return {}; }
 }
 
+const SECRET_KEYS = [
+  'ACCOUNT_SID', 'AUTH_TOKEN',
+  'MAILJET_API_KEY', 'MAILJET_API_SECRET',
+];
+const SECRET_PREFIXES = [
+  'API_KEY_SID_', 'API_KEY_SECRET_', 'AUTH_TOKEN_',
+];
+
+function isSecretKey(key) {
+  if (SECRET_KEYS.includes(key)) return true;
+  for (const prefix of SECRET_PREFIXES) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 function writeEnvFile(vars) {
   const lines = [
-    '# Twilio credentials (needed for setup script; auto-provided in Functions runtime)',
-    `ACCOUNT_SID=${vars.ACCOUNT_SID || ''}`,
-    `AUTH_TOKEN=${vars.AUTH_TOKEN || ''}`,
+    '# Non-secret configuration (credentials belong in .secrets or env vars)',
+    '# See README for API key creation instructions',
     '',
-    '# Default regions for phone numbers (us1 or ie1)',
+    '# Default regions for phone numbers',
     `VOICE_REGION=${vars.VOICE_REGION || 'us1'}`,
     `SMS_REGION=${vars.SMS_REGION || 'us1'}`,
     '',
     '# Email configuration (optional — leave blank to skip email forwarding)',
-    `MAILJET_API_KEY=${vars.MAILJET_API_KEY || ''}`,
-    `MAILJET_API_SECRET=${vars.MAILJET_API_SECRET || ''}`,
     `FORWARDING_EMAIL=${vars.FORWARDING_EMAIL || ''}`,
     `FROM_EMAIL=${vars.FROM_EMAIL || ''}`,
     '',
@@ -123,6 +222,17 @@ function writeEnvFile(vars) {
     `SMS_FORWARD_NUMBER=${vars.SMS_FORWARD_NUMBER || ''}`,
   ];
   fs.writeFileSync(ENV_PATH, lines.join('\n') + '\n');
+}
+
+function writeSecretsFile(secrets) {
+  const lines = [
+    '# Credentials — DO NOT commit this file (it is in .gitignore)',
+    '',
+  ];
+  for (const [key, val] of Object.entries(secrets)) {
+    if (val) lines.push(`${key}=${val}`);
+  }
+  fs.writeFileSync(SECRETS_PATH, lines.join('\n') + '\n', { mode: 0o600 });
 }
 
 function writePhoneConfig(config) {
@@ -180,25 +290,67 @@ function printBanner(title) {
 }
 
 // ---------------------------------------------------------------------------
-// Twilio API helpers (uses the twilio npm package)
+// Twilio API helpers — per-region client registry
 // ---------------------------------------------------------------------------
 
-let twilioClient;
+const twilioClients = {};
 
-function getTwilioClient(accountSid, authToken) {
-  if (!twilioClient) {
-    const twilio = require('twilio');
-    twilioClient = twilio(accountSid, authToken);
+function getTwilioClient({ accountSid, apiKeySid, apiKeySecret, authToken, region }) {
+  const cacheKey = region || 'default';
+  if (twilioClients[cacheKey]) return twilioClients[cacheKey];
+
+  const twilio = require('twilio');
+  const edge = getEdgeForRegion(region);
+  const opts = {};
+  if (region && region !== 'us1') opts.region = region;
+  if (edge && region !== 'us1') opts.edge = edge;
+
+  let client;
+  if (apiKeySid && apiKeySecret) {
+    opts.accountSid = accountSid;
+    client = twilio(apiKeySid, apiKeySecret, opts);
+  } else if (authToken) {
+    client = twilio(accountSid, authToken, opts);
+  } else {
+    throw new Error(`No credentials available for region ${region || 'default'}`);
   }
-  return twilioClient;
+
+  twilioClients[cacheKey] = client;
+  return client;
 }
 
-async function validateCredentials(accountSid, authToken) {
+function getClientForRegion(state, region) {
+  const creds = state.regionalCredentials[region];
+  if (!creds) return null;
+  return getTwilioClient({
+    accountSid: state.accountSid,
+    apiKeySid: creds.apiKeySid,
+    apiKeySecret: creds.apiKeySecret,
+    authToken: creds.authToken,
+    region,
+  });
+}
+
+function getAnyClient(state) {
+  // Return a client from the initial region, or any region with credentials
+  if (state.initialRegion) {
+    return getClientForRegion(state, state.initialRegion);
+  }
+  for (const region of Object.keys(state.regionalCredentials)) {
+    const client = getClientForRegion(state, region);
+    if (client) return client;
+  }
+  return null;
+}
+
+async function validateCredentials({ accountSid, apiKeySid, apiKeySecret, authToken, region }) {
   try {
-    const client = getTwilioClient(accountSid, authToken);
+    const client = getTwilioClient({ accountSid, apiKeySid, apiKeySecret, authToken, region });
     const account = await client.api.v2010.accounts(accountSid).fetch();
     return { valid: true, friendlyName: account.friendlyName };
   } catch (e) {
+    // Remove cached client on failure
+    delete twilioClients[region || 'default'];
     return { valid: false, error: e.message };
   }
 }
@@ -229,6 +381,43 @@ async function listSipDomains(client) {
 }
 
 // ---------------------------------------------------------------------------
+// Credential resolution helpers
+// ---------------------------------------------------------------------------
+
+function resolveRegionalCredentials(allConfig, cliArgs) {
+  // Build per-region credentials from CLI args, .secrets, .env, and process.env
+  const creds = {};
+
+  for (const region of VALID_REGIONS) {
+    const upper = region.toUpperCase();
+    const entry = {};
+
+    // API Key SID for this region
+    const cliKeySid = cliArgs[`apiKeySid${region.charAt(0).toUpperCase()}${region.slice(1)}`];
+    const cliKeySecret = cliArgs[`apiKeySecret${region.charAt(0).toUpperCase()}${region.slice(1)}`];
+
+    entry.apiKeySid = cliKeySid || allConfig[`API_KEY_SID_${upper}`] || '';
+    entry.apiKeySecret = cliKeySecret || allConfig[`API_KEY_SECRET_${upper}`] || '';
+    entry.authToken = cliArgs[`authToken${region.charAt(0).toUpperCase()}${region.slice(1)}`]
+      || allConfig[`AUTH_TOKEN_${upper}`] || '';
+
+    if ((entry.apiKeySid && entry.apiKeySecret) || entry.authToken) {
+      creds[region] = entry;
+    }
+  }
+
+  // Handle generic --api-key-sid / --api-key-secret / --api-key-region
+  if (cliArgs.apiKeySid && cliArgs.apiKeySecret) {
+    const region = cliArgs.apiKeyRegion || 'us1';
+    if (!creds[region]) creds[region] = {};
+    creds[region].apiKeySid = cliArgs.apiKeySid;
+    creds[region].apiKeySecret = cliArgs.apiKeySecret;
+  }
+
+  return creds;
+}
+
+// ---------------------------------------------------------------------------
 // Main setup flow
 // ---------------------------------------------------------------------------
 
@@ -248,11 +437,15 @@ async function main() {
   // State that accumulates through the steps
   const state = {
     env: loadEnvFile(),
+    secrets: loadSecretsFile(),
+    allConfig: loadAllConfig(),
     phoneConfig: loadPhoneConfig(),
     accountSid: '',
-    authToken: '',
+    regionalCredentials: {},  // { us1: { apiKeySid, apiKeySecret } | { authToken }, ... }
+    initialRegion: null,      // region of first valid credentials
     voiceRegion: 'us1',
     smsRegion: 'us1',
+    regionsNeeded: new Set(),
     numbers: [],        // from Twilio API
     numberConfigs: {},   // per-number settings we're building
     emailEnabled: false,
@@ -263,8 +456,9 @@ async function main() {
     sipDomain: '',
     sipCredentials: [],  // { number, username, password }
     deployUrls: {},      // { us1: 'https://...', ie1: 'https://...' }
-    existingServices: [],
+    existingServices: {},  // { region: [services] }
     existingSipDomains: [],
+    saveSecrets: false,    // whether user wants .secrets file
   };
 
   try {
@@ -281,7 +475,7 @@ async function main() {
     await step4_phoneNumbers(state, cliArgs, nonInteractive);
     await step5_email(state, cliArgs, nonInteractive);
     await step6_sip(state, cliArgs, nonInteractive);
-    await step7_writeConfig(state);
+    await step7_writeConfig(state, nonInteractive);
     if (!nonInteractive) await pressEnter();
 
     if (!cliArgs.skipDeploy) {
@@ -304,17 +498,22 @@ async function main() {
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: Credentials
+// Step 1: Credentials — API keys recommended
 // ---------------------------------------------------------------------------
 
 async function step1_credentials(state, cliArgs, nonInteractive) {
   printBanner('Step 1: Twilio Account Credentials');
 
-  print('Your Account SID and Auth Token are at https://console.twilio.com/');
-  print('These are needed to deploy functions and configure phone numbers.\n');
+  print('Twilio requires per-region credentials. API keys are recommended');
+  print('(standard keys, not restricted).\n');
+  print('Create API keys at the Twilio Console:');
+  print('  US1: https://console.twilio.com/ → Account → API keys & tokens');
+  print('  IE1: https://console.ie1.twilio.com/ → Account → API keys & tokens');
+  print('  AU1: https://console.au1.twilio.com/ → Account → API keys & tokens\n');
+  print('You can also use an Auth Token per region (AUTH_TOKEN_US1, AUTH_TOKEN_IE1, etc.).\n');
 
-  let sid = cliArgs.accountSid || state.env.ACCOUNT_SID || process.env.ACCOUNT_SID || '';
-  let token = cliArgs.authToken || state.env.AUTH_TOKEN || process.env.AUTH_TOKEN || '';
+  // Resolve Account SID
+  let sid = cliArgs.accountSid || state.allConfig.ACCOUNT_SID || '';
 
   if (!nonInteractive) {
     if (sid) {
@@ -325,34 +524,103 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
     if (!sid) {
       sid = await ask('Account SID');
     }
-
-    if (token) {
-      print(`Found Auth Token: ${token.slice(0, 4)}${'*'.repeat(token.length - 4)}`);
-      const keep = await ask('Keep this Auth Token? (y/n)', 'y');
-      if (keep.toLowerCase() !== 'y') token = '';
-    }
-    if (!token) {
-      token = await ask('Auth Token');
-    }
   }
 
-  if (!sid || !token) {
-    print('Error: Account SID and Auth Token are required.');
+  if (!sid) {
+    print('Error: Account SID is required.');
     process.exit(1);
   }
 
-  print('\nValidating credentials...');
-  const result = await validateCredentials(sid, token);
+  state.accountSid = sid;
+
+  // Resolve regional credentials from CLI args / config files / env vars
+  const preResolved = resolveRegionalCredentials(state.allConfig, cliArgs);
+  state.regionalCredentials = preResolved;
+
+  // If we already have credentials for at least one region, try to validate
+  const existingRegions = Object.keys(preResolved);
+
+  if (existingRegions.length > 0 && !nonInteractive) {
+    print(`\nFound credentials for region(s): ${existingRegions.join(', ')}`);
+    const keep = await ask('Keep existing credentials? (y/n)', 'y');
+    if (keep.toLowerCase() !== 'y') {
+      state.regionalCredentials = {};
+    }
+  }
+
+  // If no credentials yet, prompt for initial credentials
+  if (Object.keys(state.regionalCredentials).length === 0) {
+    if (nonInteractive) {
+      print('Error: No credentials found. Provide API key or auth token via CLI flags, env vars, or .secrets file.');
+      process.exit(1);
+    }
+
+    print('\nProvide credentials for your first region.\n');
+    const authType = await ask('Use API key (k) or Auth Token (t)?', 'k');
+
+    let region;
+    if (authType.toLowerCase() === 't') {
+      const token = await ask('Auth Token');
+      region = await ask('Region for this token', 'us1');
+      if (!VALID_REGIONS.includes(region)) {
+        print(`Warning: "${region}" is not recognized, using us1.`);
+        region = 'us1';
+      }
+      state.regionalCredentials[region] = { authToken: token };
+    } else {
+      const keySid = await ask('API Key SID');
+      const keySecret = await ask('API Key Secret');
+      region = await ask('Region for this key', 'us1');
+      if (!VALID_REGIONS.includes(region)) {
+        print(`Warning: "${region}" is not recognized, using us1.`);
+        region = 'us1';
+      }
+      state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
+    }
+
+    state.initialRegion = region;
+  } else {
+    state.initialRegion = existingRegions[0];
+  }
+
+  // Validate initial credentials
+  const initRegion = state.initialRegion;
+  const initCreds = state.regionalCredentials[initRegion];
+
+  print(`\nValidating credentials for ${initRegion}...`);
+  const result = await validateCredentials({
+    accountSid: sid,
+    apiKeySid: initCreds.apiKeySid,
+    apiKeySecret: initCreds.apiKeySecret,
+    authToken: initCreds.authToken,
+    region: initRegion,
+  });
+
   if (!result.valid) {
-    print(`Error: Invalid credentials — ${result.error}`);
+    print(`Error: Invalid credentials for ${initRegion} — ${result.error}`);
     process.exit(1);
   }
   print(`Authenticated as: ${result.friendlyName}\n`);
 
-  state.accountSid = sid;
-  state.authToken = token;
-  state.env.ACCOUNT_SID = sid;
-  state.env.AUTH_TOKEN = token;
+  // Validate any other pre-resolved credentials
+  for (const region of Object.keys(state.regionalCredentials)) {
+    if (region === initRegion) continue;
+    const creds = state.regionalCredentials[region];
+    print(`Validating credentials for ${region}...`);
+    const res = await validateCredentials({
+      accountSid: sid,
+      apiKeySid: creds.apiKeySid,
+      apiKeySecret: creds.apiKeySecret,
+      authToken: creds.authToken,
+      region,
+    });
+    if (res.valid) {
+      print(`  ${region}: valid`);
+    } else {
+      print(`  ${region}: invalid — ${res.error} (removing)`);
+      delete state.regionalCredentials[region];
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -362,28 +630,35 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
 async function step2_detectExisting(state) {
   printBanner('Step 2: Checking Existing Configuration');
 
-  const client = getTwilioClient(state.accountSid, state.authToken);
+  const client = getAnyClient(state);
+  if (!client) {
+    print('No valid client available. Skipping detection.\n');
+    return;
+  }
 
   print('Querying Twilio API...\n');
 
-  const [services, sipDomains, numbers] = await Promise.all([
-    listServerlessServices(client),
+  // Account-level queries (work from any region)
+  const [sipDomains, numbers] = await Promise.all([
     listSipDomains(client),
     listPhoneNumbers(client),
   ]);
 
-  state.existingServices = services;
   state.existingSipDomains = sipDomains;
   state.numbers = numbers;
 
+  // Serverless services are region-specific — query the initial region
+  const initServices = await listServerlessServices(client);
+  state.existingServices[state.initialRegion] = initServices;
+
   // Services
-  if (services.length > 0) {
-    print('Serverless services:');
-    for (const s of services) {
+  if (initServices.length > 0) {
+    print(`Serverless services (${state.initialRegion}):`);
+    for (const s of initServices) {
       print(`  - ${s.friendlyName} (${s.sid})`);
     }
   } else {
-    print('No serverless services found.');
+    print(`No serverless services found in ${state.initialRegion}.`);
   }
 
   // SIP domains
@@ -417,7 +692,8 @@ async function step2_detectExisting(state) {
     }
   }
 
-  if (Object.keys(state.env).length > 2) { // more than just SID+token
+  const envKeys = Object.keys(state.env).filter(k => !isSecretKey(k));
+  if (envKeys.length > 0) {
     print('\nExisting .env values detected — will pre-fill prompts.');
   }
 
@@ -425,47 +701,221 @@ async function step2_detectExisting(state) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 3: Region selection
+// Step 3: Consolidated region selection
 // ---------------------------------------------------------------------------
 
 async function step3_regions(state, cliArgs, nonInteractive) {
-  printBanner('Step 3: Default Regions');
+  printBanner('Step 3: Regions');
 
-  print('Twilio can process voice calls and SMS in different regions.');
-  print('Choose the regions closest to your callers for lowest latency.\n');
-  print('Available regions:');
-  print('  us1 — Virginia, USA (generally available)');
-  print('  ie1 — Dublin, Ireland (beta)\n');
-  print('You can override the region per phone number in the next step.\n');
+  // a) Display available regions
+  print('Available regions:\n');
+  for (const [id, info] of Object.entries(REGIONS)) {
+    const features = Object.entries(info.features)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+      .join(', ');
+    print(`  ${id} — ${info.location} (${info.status})`);
+    print(`         Features: ${features}`);
+  }
+  print('');
 
-  let voiceRegion = cliArgs.voiceRegion || state.env.VOICE_REGION || 'us1';
-  let smsRegion = cliArgs.smsRegion || state.env.SMS_REGION || 'us1';
+  // b) Auto-recommend per number
+  const numberRegions = {};  // { number: { voice: region, sms: region } }
+
+  if (state.numbers.length > 0) {
+    print('Region recommendations per phone number:\n');
+    for (const n of state.numbers) {
+      const existing = state.phoneConfig[n.number] || {};
+      const recVoice = recommendRegion(n.number, 'voice');
+      const recSms = recommendRegion(n.number, 'sms');
+      const label = n.friendlyName !== n.number ? ` (${n.friendlyName})` : '';
+      print(`  ${n.number}${label}:`);
+      print(`    Voice: ${recVoice} (recommended)  SMS: ${recSms} (recommended)`);
+
+      numberRegions[n.number] = {
+        voice: existing.voiceRegion || recVoice,
+        sms: existing.smsRegion || recSms,
+      };
+    }
+    print('');
+  }
+
+  // c) Ask user to confirm/adjust regions per number
+  let defaultVoice = cliArgs.voiceRegion || state.env.VOICE_REGION || 'us1';
+  let defaultSms = cliArgs.smsRegion || state.env.SMS_REGION || 'us1';
 
   if (!nonInteractive) {
-    voiceRegion = await ask('Default voice region (us1 or ie1)', voiceRegion);
-    smsRegion = await ask('Default SMS region (us1 or ie1)', smsRegion);
+    defaultVoice = await ask('Default voice region', defaultVoice);
+    defaultSms = await ask('Default SMS region', defaultSms);
+
+    if (!VALID_REGIONS.includes(defaultVoice)) {
+      print(`Warning: "${defaultVoice}" is not recognized, using us1.`);
+      defaultVoice = 'us1';
+    }
+    if (!VALID_REGIONS.includes(defaultSms)) {
+      print(`Warning: "${defaultSms}" is not recognized, using us1.`);
+      defaultSms = 'us1';
+    }
+
+    // Per-number region confirmation
+    if (state.numbers.length > 0) {
+      print('\nConfirm/adjust regions per phone number:');
+      for (const n of state.numbers) {
+        const rec = numberRegions[n.number] || { voice: defaultVoice, sms: defaultSms };
+        const label = n.friendlyName !== n.number ? ` (${n.friendlyName})` : '';
+        print(`\n  ${n.number}${label}:`);
+        const vr = await ask('    Voice region', rec.voice);
+        const sr = await ask('    SMS region', rec.sms);
+        numberRegions[n.number] = {
+          voice: VALID_REGIONS.includes(vr) ? vr : defaultVoice,
+          sms: VALID_REGIONS.includes(sr) ? sr : defaultSms,
+        };
+      }
+    }
+
+    // SIP region
+    if (!cliArgs.skipSip) {
+      const existingDomain = state.env.SIP_DOMAIN || '';
+      let sipRegionDefault = 'us1';
+      if (existingDomain) {
+        const match = existingDomain.match(/\.sip\.(\w+)\.twilio\.com$/);
+        if (match) sipRegionDefault = match[1];
+      }
+      if (cliArgs.sipRegion) sipRegionDefault = cliArgs.sipRegion;
+      const sr = await ask('SIP region (if using SIP)', sipRegionDefault);
+      state.sipRegion = VALID_REGIONS.includes(sr) ? sr : 'us1';
+    }
+  } else {
+    if (!VALID_REGIONS.includes(defaultVoice)) defaultVoice = 'us1';
+    if (!VALID_REGIONS.includes(defaultSms)) defaultSms = 'us1';
+
+    // Auto-assign regions for non-interactive
+    for (const n of state.numbers) {
+      const existing = state.phoneConfig[n.number] || {};
+      numberRegions[n.number] = {
+        voice: existing.voiceRegion || defaultVoice,
+        sms: existing.smsRegion || defaultSms,
+      };
+    }
+
+    if (cliArgs.sipRegion && VALID_REGIONS.includes(cliArgs.sipRegion)) {
+      state.sipRegion = cliArgs.sipRegion;
+    }
   }
 
-  if (!VALID_REGIONS.includes(voiceRegion)) {
-    print(`Warning: "${voiceRegion}" is not a recognized region, using us1.`);
-    voiceRegion = 'us1';
-  }
-  if (!VALID_REGIONS.includes(smsRegion)) {
-    print(`Warning: "${smsRegion}" is not a recognized region, using us1.`);
-    smsRegion = 'us1';
+  state.voiceRegion = defaultVoice;
+  state.smsRegion = defaultSms;
+  state.env.VOICE_REGION = defaultVoice;
+  state.env.SMS_REGION = defaultSms;
+
+  // Store per-number regions in numberConfigs for later steps
+  for (const n of state.numbers) {
+    if (!state.numberConfigs[n.number]) state.numberConfigs[n.number] = {};
+    const nr = numberRegions[n.number];
+    if (nr) {
+      if (nr.voice !== defaultVoice) state.numberConfigs[n.number].voiceRegion = nr.voice;
+      if (nr.sms !== defaultSms) state.numberConfigs[n.number].smsRegion = nr.sms;
+    }
   }
 
-  state.voiceRegion = voiceRegion;
-  state.smsRegion = smsRegion;
-  state.env.VOICE_REGION = voiceRegion;
-  state.env.SMS_REGION = smsRegion;
+  // d) Validate feature support
+  for (const n of state.numbers) {
+    const nr = numberRegions[n.number] || { voice: defaultVoice, sms: defaultSms };
+    if (!regionSupportsFeature(nr.voice, 'voice')) {
+      print(`Warning: ${nr.voice} does not support voice. ${n.number} falling back to us1.`);
+      nr.voice = 'us1';
+      state.numberConfigs[n.number].voiceRegion = 'us1';
+    }
+    if (!regionSupportsFeature(nr.sms, 'sms')) {
+      // SMS may work through functions in that region even if not officially supported
+      // Just warn, don't force fallback
+      print(`Note: ${nr.sms} has limited SMS support for ${n.number}. SMS may use the functions deployment URL.`);
+    }
+  }
 
-  print(`\nDefault voice region: ${voiceRegion}`);
-  print(`Default SMS region:   ${smsRegion}`);
+  // e) Collect regionsNeeded
+  state.regionsNeeded.add(defaultVoice);
+  state.regionsNeeded.add(defaultSms);
+  for (const n of state.numbers) {
+    const nr = numberRegions[n.number] || {};
+    if (nr.voice) state.regionsNeeded.add(nr.voice);
+    if (nr.sms) state.regionsNeeded.add(nr.sms);
+  }
+  if (state.sipRegion) state.regionsNeeded.add(state.sipRegion);
+
+  print(`\nDefault voice region: ${defaultVoice}`);
+  print(`Default SMS region:   ${defaultSms}`);
+  print(`Regions needed: ${[...state.regionsNeeded].join(', ')}`);
+
+  // f) Collect credentials for each needed region without credentials
+  for (const region of state.regionsNeeded) {
+    if (state.regionalCredentials[region]) continue;
+
+    if (nonInteractive) {
+      print(`Warning: No credentials for ${region}. Numbers using this region may not work.`);
+      continue;
+    }
+
+    print(`\nCredentials needed for ${region}.`);
+    print(`Create an API key at the Twilio Console for ${region}.`);
+
+    const authType = await ask(`  Use API key (k) or Auth Token (t) for ${region}?`, 'k');
+    if (authType.toLowerCase() === 't') {
+      const token = await ask(`  Auth Token for ${region}`);
+      if (!token) {
+        print(`  Skipping ${region} — numbers in this region will fall back.`);
+        continue;
+      }
+      state.regionalCredentials[region] = { authToken: token };
+    } else {
+      const keySid = await ask(`  API Key SID for ${region}`);
+      const keySecret = await ask(`  API Key Secret for ${region}`);
+      if (!keySid || !keySecret) {
+        print(`  Skipping ${region} — numbers in this region will fall back.`);
+        continue;
+      }
+      state.regionalCredentials[region] = { apiKeySid: keySid, apiKeySecret: keySecret };
+    }
+
+    // Validate
+    const creds = state.regionalCredentials[region];
+    print(`  Validating credentials for ${region}...`);
+    const res = await validateCredentials({
+      accountSid: state.accountSid,
+      apiKeySid: creds.apiKeySid,
+      apiKeySecret: creds.apiKeySecret,
+      authToken: creds.authToken,
+      region,
+    });
+    if (res.valid) {
+      print(`  ${region}: valid`);
+    } else {
+      print(`  ${region}: invalid — ${res.error}`);
+      delete state.regionalCredentials[region];
+      print(`  Numbers using ${region} will need to fall back to another region.`);
+    }
+  }
+
+  // g) Check existing services across all credentialed regions
+  for (const region of Object.keys(state.regionalCredentials)) {
+    if (state.existingServices[region]) continue; // already checked
+    const client = getClientForRegion(state, region);
+    if (!client) continue;
+    try {
+      const services = await listServerlessServices(client);
+      state.existingServices[region] = services;
+      if (services.length > 0) {
+        print(`\nServerless services in ${region}:`);
+        for (const s of services) {
+          print(`  - ${s.friendlyName} (${s.sid})`);
+        }
+      }
+    } catch { /* ignore */ }
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Step 4: Phone number configuration
+// Step 4: Phone number configuration (no region prompts)
 // ---------------------------------------------------------------------------
 
 async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
@@ -495,6 +945,7 @@ async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
 
     for (const n of state.numbers) {
       const existing = state.phoneConfig[n.number] || {};
+      const current = state.numberConfigs[n.number] || {};
       const label = n.friendlyName !== n.number ? ` (${n.friendlyName})` : '';
 
       print(`--- ${n.number}${label} ---`);
@@ -519,38 +970,31 @@ async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
         '  Thank-you message audio URL or asset path (e.g. /thankyou.mp3)',
         existing.thankYouMessageUrl || ''
       );
-      const vr = await ask(
-        '  Voice region (us1 or ie1)',
-        existing.voiceRegion || state.voiceRegion
-      );
-      const sr = await ask(
-        '  SMS region (us1 or ie1)',
-        existing.smsRegion || state.smsRegion
-      );
 
-      const cfg = {};
+      // Merge with region settings already in numberConfigs from Step 3
+      const cfg = { ...current };
       if (email && email !== '(global)' && email !== globalEmail) cfg.forwardingEmail = email;
       if (smsForward && smsForward !== globalSmsForward) cfg.smsForwardNumber = smsForward;
       if (answerName && answerName !== globalAnswerName) cfg.answerMessageName = answerName;
       if (answerUrl && answerUrl !== globalAnswerUrl) cfg.answerMessageUrl = answerUrl;
       if (thankYouUrl && thankYouUrl !== globalThankYouUrl) cfg.thankYouMessageUrl = thankYouUrl;
-      if (vr && vr !== state.voiceRegion) cfg.voiceRegion = vr;
-      if (sr && sr !== state.smsRegion) cfg.smsRegion = sr;
 
       state.numberConfigs[n.number] = cfg;
       print('');
     }
   } else {
-    // Non-interactive: preserve existing config
+    // Non-interactive: preserve existing config, merge with region configs from Step 3
     for (const n of state.numbers) {
-      state.numberConfigs[n.number] = state.phoneConfig[n.number] || {};
+      const existing = state.phoneConfig[n.number] || {};
+      const current = state.numberConfigs[n.number] || {};
+      state.numberConfigs[n.number] = { ...existing, ...current };
     }
   }
 
   print('Per-number configuration:');
   for (const n of state.numbers) {
     const cfg = state.numberConfigs[n.number];
-    if (Object.keys(cfg).length > 0) {
+    if (cfg && Object.keys(cfg).length > 0) {
       print(`  ${n.number}: ${JSON.stringify(cfg)}`);
     } else {
       print(`  ${n.number}: (using global defaults)`);
@@ -569,8 +1013,8 @@ async function step5_email(state, cliArgs, nonInteractive) {
   print('Sign up at https://www.mailjet.com/ for a free account (200 emails/day).');
   print('Leave blank to skip email forwarding entirely.\n');
 
-  let mailjetKey = cliArgs.mailjetKey || state.env.MAILJET_API_KEY || '';
-  let mailjetSecret = cliArgs.mailjetSecret || state.env.MAILJET_API_SECRET || '';
+  let mailjetKey = cliArgs.mailjetKey || state.allConfig.MAILJET_API_KEY || '';
+  let mailjetSecret = cliArgs.mailjetSecret || state.allConfig.MAILJET_API_SECRET || '';
   let forwardingEmail = cliArgs.forwardingEmail || state.env.FORWARDING_EMAIL || '';
   let fromEmail = cliArgs.fromEmail || state.env.FROM_EMAIL || '';
 
@@ -585,8 +1029,8 @@ async function step5_email(state, cliArgs, nonInteractive) {
   }
 
   state.emailEnabled = !!(mailjetKey && mailjetSecret);
-  state.env.MAILJET_API_KEY = mailjetKey;
-  state.env.MAILJET_API_SECRET = mailjetSecret;
+  state.mailjetKey = mailjetKey;
+  state.mailjetSecret = mailjetSecret;
   state.env.FORWARDING_EMAIL = forwardingEmail;
   state.env.FROM_EMAIL = fromEmail;
 
@@ -610,7 +1054,7 @@ async function step5_email(state, cliArgs, nonInteractive) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 6: SIP setup
+// Step 6: SIP setup (region already chosen in Step 3)
 // ---------------------------------------------------------------------------
 
 async function step6_sip(state, cliArgs, nonInteractive) {
@@ -618,8 +1062,6 @@ async function step6_sip(state, cliArgs, nonInteractive) {
 
   print('SIP lets you answer calls on a softphone (e.g. Zoiper) and make');
   print('outbound calls through your Twilio numbers.\n');
-  print('SIP domains are available in us1 or ie1.');
-  print('Format: yourname.sip.us1.twilio.com or yourname.sip.ie1.twilio.com\n');
 
   if (cliArgs.skipSip) {
     print('(Skipped via --skip-sip flag)\n');
@@ -628,12 +1070,11 @@ async function step6_sip(state, cliArgs, nonInteractive) {
   }
 
   let sipDomainName = cliArgs.sipDomainName || '';
-  let sipRegion = cliArgs.sipRegion || 'us1';
+  let sipRegion = state.sipRegion;
 
   // Try to detect existing SIP domain from env or API
   const existingDomain = state.env.SIP_DOMAIN || '';
   if (existingDomain) {
-    // Parse existing domain: name.sip.region.twilio.com
     const match = existingDomain.match(/^(.+)\.sip\.(\w+)\.twilio\.com$/);
     if (match) {
       sipDomainName = sipDomainName || match[1];
@@ -651,7 +1092,7 @@ async function step6_sip(state, cliArgs, nonInteractive) {
     }
 
     sipDomainName = await ask('SIP domain prefix (e.g. "yourname")', sipDomainName);
-    sipRegion = await ask('SIP region (us1 or ie1)', sipRegion);
+    print(`SIP region: ${sipRegion} (configured in Step 3)`);
   } else if (!sipDomainName) {
     state.sipEnabled = false;
     return;
@@ -672,7 +1113,17 @@ async function step6_sip(state, cliArgs, nonInteractive) {
 
   print(`\nSIP domain: ${fullDomain}`);
 
-  const client = getTwilioClient(state.accountSid, state.authToken);
+  // Use the regional client for SIP operations
+  let client = getClientForRegion(state, sipRegion);
+  if (!client) {
+    // Fall back to any available client (SIP domains are account-level)
+    client = getAnyClient(state);
+  }
+  if (!client) {
+    print('Error: No valid client available for SIP setup.');
+    state.sipEnabled = false;
+    return;
+  }
 
   // Create or find existing SIP domain
   print('Checking for existing SIP domain...');
@@ -734,11 +1185,6 @@ async function step6_sip(state, cliArgs, nonInteractive) {
     print(`Note: Could not map credential list for registration: ${e.message}`);
   }
 
-  // Also map for calls (IP Access Control is separate from registration)
-  // Registration mapping handles SIP REGISTER; we also want to allow calls
-  // Some setups need the credential list mapped under calls as well
-  // This is optional and depends on the domain config
-
   // Create credentials for each phone number
   print('\nCreating SIP credentials for phone numbers...');
   const existingCreds = await client.sip
@@ -748,7 +1194,7 @@ async function step6_sip(state, cliArgs, nonInteractive) {
   state.sipCredentials = [];
 
   for (const n of state.numbers) {
-    const username = n.number; // E.164 format
+    const username = n.number;
     const existing = existingCreds.find(c => c.username === username);
 
     if (existing) {
@@ -807,10 +1253,10 @@ async function step6_sip(state, cliArgs, nonInteractive) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 7: Write config files
+// Step 7: Write config files — secrets separated
 // ---------------------------------------------------------------------------
 
-async function step7_writeConfig(state) {
+async function step7_writeConfig(state, nonInteractive) {
   printBanner('Step 7: Writing Configuration');
 
   // Merge number configs
@@ -818,25 +1264,74 @@ async function step7_writeConfig(state) {
   for (const [num, cfg] of Object.entries(state.numberConfigs)) {
     if (Object.keys(cfg).length > 0) {
       phoneConfig[num] = { ...phoneConfig[num], ...cfg };
-    } else if (!phoneConfig[num]) {
-      // Number exists but has no overrides; don't add an empty entry
     }
   }
 
+  // Build secrets object
+  const secrets = {};
+  secrets.ACCOUNT_SID = state.accountSid;
+  for (const [region, creds] of Object.entries(state.regionalCredentials)) {
+    const upper = region.toUpperCase();
+    if (creds.apiKeySid) secrets[`API_KEY_SID_${upper}`] = creds.apiKeySid;
+    if (creds.apiKeySecret) secrets[`API_KEY_SECRET_${upper}`] = creds.apiKeySecret;
+    if (creds.authToken) secrets[`AUTH_TOKEN_${upper}`] = creds.authToken;
+  }
+  if (state.mailjetKey) secrets.MAILJET_API_KEY = state.mailjetKey;
+  if (state.mailjetSecret) secrets.MAILJET_API_SECRET = state.mailjetSecret;
+
+  // Ask about .secrets file
+  let saveSecrets = false;
+  if (!nonInteractive) {
+    const answer = await ask('Save credentials to .secrets file? (y/n)', 'y');
+    saveSecrets = answer.toLowerCase() === 'y';
+  } else {
+    // In non-interactive mode, save .secrets if we have credentials
+    saveSecrets = Object.keys(secrets).length > 0;
+  }
+  state.saveSecrets = saveSecrets;
+
+  // Check if existing .env has secrets that need migrating
+  const existingEnv = loadEnvFile();
+  const envSecrets = {};
+  for (const [k, v] of Object.entries(existingEnv)) {
+    if (isSecretKey(k) && v) {
+      envSecrets[k] = v;
+    }
+  }
+
+  // Write .env (non-secret config only)
   writeEnvFile(state.env);
-  print(`Wrote ${ENV_PATH}`);
+  print(`Wrote ${ENV_PATH} (non-secret config)`);
+
+  if (saveSecrets) {
+    // Merge any existing .env secrets into .secrets if migrating
+    const allSecrets = { ...envSecrets, ...secrets };
+    writeSecretsFile(allSecrets);
+    print(`Wrote ${SECRETS_PATH} (credentials)`);
+
+    if (Object.keys(envSecrets).length > 0) {
+      print('  Migrated secrets from .env to .secrets.');
+    }
+  } else {
+    if (Object.keys(secrets).length > 0) {
+      print('\nCredentials NOT saved to file. Set these environment variables:');
+      for (const [k, v] of Object.entries(secrets)) {
+        const display = k.includes('SECRET') || k.includes('TOKEN')
+          ? `${v.slice(0, 4)}${'*'.repeat(Math.max(0, v.length - 4))}`
+          : v;
+        print(`  export ${k}=${display}`);
+      }
+    }
+  }
 
   writePhoneConfig(phoneConfig);
   print(`Wrote ${PHONE_CONFIG_PATH}`);
 
-  // Show summary
+  // Show .env summary
   print('\n.env contents:');
-  for (const [k, v] of Object.entries(state.env)) {
-    if (k === 'AUTH_TOKEN' && v) {
-      print(`  ${k}=${v.slice(0, 4)}${'*'.repeat(Math.max(0, v.length - 4))}`);
-    } else {
-      print(`  ${k}=${v}`);
-    }
+  const envContents = loadEnvFile();
+  for (const [k, v] of Object.entries(envContents)) {
+    print(`  ${k}=${v}`);
   }
 
   if (Object.keys(phoneConfig).length > 0) {
@@ -848,26 +1343,28 @@ async function step7_writeConfig(state) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 8: Deploy
+// Step 8: Deploy — regional auth via env vars
 // ---------------------------------------------------------------------------
 
 async function step8_deploy(state, nonInteractive) {
   printBanner('Step 8: Deploy to Twilio');
 
-  // Determine regions needed
-  const regionsNeeded = new Set();
-  regionsNeeded.add(state.voiceRegion);
-  regionsNeeded.add(state.smsRegion);
+  // Filter to regions that support functions
+  const deployRegions = [...state.regionsNeeded].filter(r => {
+    if (!regionSupportsFeature(r, 'functions')) {
+      print(`Skipping ${r} — does not support serverless functions.`);
+      print(`  Numbers using ${r} should point webhooks at a different region's deployment.\n`);
+      return false;
+    }
+    return true;
+  });
 
-  for (const cfg of Object.values(state.numberConfigs)) {
-    if (cfg.voiceRegion) regionsNeeded.add(cfg.voiceRegion);
-    if (cfg.smsRegion) regionsNeeded.add(cfg.smsRegion);
-  }
-  if (state.sipEnabled && state.sipRegion) {
-    regionsNeeded.add(state.sipRegion);
+  if (deployRegions.length === 0) {
+    print('No regions to deploy to.\n');
+    return;
   }
 
-  print(`Regions to deploy: ${[...regionsNeeded].join(', ')}\n`);
+  print(`Regions to deploy: ${deployRegions.join(', ')}\n`);
 
   // Check if twilio CLI is available
   const cliAvailable = checkTwilioCli();
@@ -887,15 +1384,35 @@ async function step8_deploy(state, nonInteractive) {
     }
   }
 
-  for (const region of regionsNeeded) {
+  for (const region of deployRegions) {
     print(`\nDeploying to ${region}...`);
 
+    const creds = state.regionalCredentials[region];
+    if (!creds) {
+      print(`  No credentials for ${region}, skipping deployment.`);
+      continue;
+    }
+
     const envVars = { ...process.env };
-    if (region === 'ie1') {
-      envVars.TWILIO_REGION = 'ie1';
-      envVars.TWILIO_EDGE = 'dublin';
+
+    // Set authentication env vars for the twilio CLI subprocess
+    envVars.TWILIO_ACCOUNT_SID = state.accountSid;
+    if (creds.apiKeySid && creds.apiKeySecret) {
+      envVars.TWILIO_API_KEY = creds.apiKeySid;
+      envVars.TWILIO_API_SECRET = creds.apiKeySecret;
+    } else if (creds.authToken) {
+      envVars.TWILIO_AUTH_TOKEN = creds.authToken;
+      // Clear API key vars in case they're set in the environment
+      delete envVars.TWILIO_API_KEY;
+      delete envVars.TWILIO_API_SECRET;
+    }
+
+    // Set region/edge
+    const edge = getEdgeForRegion(region);
+    if (region !== 'us1') {
+      envVars.TWILIO_REGION = region;
+      if (edge) envVars.TWILIO_EDGE = edge;
     } else {
-      // us1 is default, no special env needed
       delete envVars.TWILIO_REGION;
       delete envVars.TWILIO_EDGE;
     }
@@ -912,14 +1429,12 @@ async function step8_deploy(state, nonInteractive) {
       print(output);
 
       // Extract the deployment URL from output
-      // Typical output includes: "https://phone-handling-1234.twil.io"
       const urlMatch = output.match(/https:\/\/[\w-]+\.twil\.io/);
       if (urlMatch) {
         state.deployUrls[region] = urlMatch[0];
         print(`Deployment URL for ${region}: ${state.deployUrls[region]}`);
       } else {
         print(`Warning: Could not extract deployment URL for ${region} from output.`);
-        // Try to get it from the API
         const url = await getDeployedUrl(state, region);
         if (url) {
           state.deployUrls[region] = url;
@@ -957,21 +1472,16 @@ function checkTwilioCli() {
 
 async function getDeployedUrl(state, region) {
   try {
-    const client = getTwilioClient(state.accountSid, state.authToken);
+    const client = getClientForRegion(state, region);
+    if (!client) return null;
     const services = await client.serverless.v1.services.list();
-    // Find the most recently deployed service
     for (const svc of services) {
       const environments = await client.serverless.v1
         .services(svc.sid)
         .environments.list();
       for (const env of environments) {
         if (env.domainName) {
-          // Check if this matches the region
-          if (region === 'ie1' && env.domainName.includes('ie1')) {
-            return `https://${env.domainName}`;
-          } else if (region === 'us1' && !env.domainName.includes('ie1')) {
-            return `https://${env.domainName}`;
-          }
+          return `https://${env.domainName}`;
         }
       }
     }
@@ -980,13 +1490,11 @@ async function getDeployedUrl(state, region) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 9: Configure webhooks
+// Step 9: Configure webhooks — use regional client per phone number
 // ---------------------------------------------------------------------------
 
 async function step9_configureWebhooks(state, nonInteractive) {
   printBanner('Step 9: Configure Phone Numbers & SIP Domain');
-
-  const client = getTwilioClient(state.accountSid, state.authToken);
 
   // Default URL is the us1 deployment (or the only one we have)
   const defaultUrl = state.deployUrls.us1 || state.deployUrls.ie1 || Object.values(state.deployUrls)[0];
@@ -996,8 +1504,14 @@ async function step9_configureWebhooks(state, nonInteractive) {
     const vr = cfg.voiceRegion || state.voiceRegion;
     const sr = cfg.smsRegion || state.smsRegion;
 
-    const voiceUrl = (state.deployUrls[vr] || defaultUrl) + '/voice-response';
-    const smsUrl = (state.deployUrls[sr] || defaultUrl) + '/sms-handler';
+    // For webhook URLs, use the deployment in the number's voice/SMS region.
+    // If that region doesn't have a deployment (e.g. no functions support),
+    // fall back to the nearest region that does.
+    const voiceDeployRegion = state.deployUrls[vr] ? vr : Object.keys(state.deployUrls)[0];
+    const smsDeployRegion = state.deployUrls[sr] ? sr : Object.keys(state.deployUrls)[0];
+
+    const voiceUrl = (state.deployUrls[voiceDeployRegion] || defaultUrl) + '/voice-response';
+    const smsUrl = (state.deployUrls[smsDeployRegion] || defaultUrl) + '/sms-handler';
 
     const label = n.friendlyName !== n.number ? ` (${n.friendlyName})` : '';
 
@@ -1030,6 +1544,18 @@ async function step9_configureWebhooks(state, nonInteractive) {
       }
     }
 
+    // Use the regional client for this number's voice region to update webhooks.
+    // Phone number webhook configuration is region-specific for routing.
+    let client = getClientForRegion(state, vr);
+    if (!client) {
+      // Fall back to any available client
+      client = getAnyClient(state);
+    }
+    if (!client) {
+      print(`  Warning: No client available for ${vr}, skipping webhook update.`);
+      continue;
+    }
+
     try {
       await client.incomingPhoneNumbers(n.sid).update({
         voiceUrl,
@@ -1041,34 +1567,31 @@ async function step9_configureWebhooks(state, nonInteractive) {
     } catch (e) {
       print(`  Error updating webhooks: ${e.message}`);
     }
-
-    // Set voice inbound processing region
-    if (VALID_REGIONS.includes(vr)) {
-      try {
-        await client.incomingPhoneNumbers(n.sid).update({
-          voiceReceiveMode: 'voice',
-        });
-        // Note: Twilio's Inbound Processing Region is set at the account level
-        // or via the number's voice region, which is handled by the webhook URL
-        // pointing to the correct regional deployment
-      } catch { /* region setting is best-effort */ }
-    }
   }
 
   // Update SIP domain webhook if SIP is enabled
   if (state.sipEnabled && state.sipDomainSid) {
-    const sipUrl = (state.deployUrls[state.sipRegion] || defaultUrl) + '/sip-outbound';
+    const sipDeployRegion = state.deployUrls[state.sipRegion]
+      ? state.sipRegion
+      : Object.keys(state.deployUrls)[0];
+    const sipUrl = (state.deployUrls[sipDeployRegion] || defaultUrl) + '/sip-outbound';
     print(`\nSIP domain (${state.sipDomain}):`);
     print(`  Voice URL: ${sipUrl}`);
 
-    try {
-      await client.sip.domains(state.sipDomainSid).update({
-        voiceUrl: sipUrl,
-        voiceMethod: 'POST',
-      });
-      print('  Updated.');
-    } catch (e) {
-      print(`  Error updating SIP domain: ${e.message}`);
+    let client = getClientForRegion(state, state.sipRegion);
+    if (!client) client = getAnyClient(state);
+    if (!client) {
+      print('  Warning: No client available for SIP domain update.');
+    } else {
+      try {
+        await client.sip.domains(state.sipDomainSid).update({
+          voiceUrl: sipUrl,
+          voiceMethod: 'POST',
+        });
+        print('  Updated.');
+      } catch (e) {
+        print(`  Error updating SIP domain: ${e.message}`);
+      }
     }
   }
 }
@@ -1083,6 +1606,18 @@ function step10_summary(state) {
   print(`Account: ${state.accountSid}`);
   print(`Default voice region: ${state.voiceRegion}`);
   print(`Default SMS region:   ${state.smsRegion}`);
+
+  // Regional credential status
+  print('\nCredentials:');
+  for (const region of VALID_REGIONS) {
+    const creds = state.regionalCredentials[region];
+    if (creds) {
+      const type = creds.apiKeySid ? 'API key' : 'Auth Token';
+      print(`  ${region}: ${type}`);
+    } else if (state.regionsNeeded.has(region)) {
+      print(`  ${region}: MISSING (needed)`);
+    }
+  }
 
   if (Object.keys(state.deployUrls).length > 0) {
     print('\nDeployment URLs:');
@@ -1120,6 +1655,12 @@ function step10_summary(state) {
         print(`  ${c.username} / ${c.password}`);
       }
     }
+  }
+
+  if (state.saveSecrets) {
+    print(`\nCredentials saved to: ${SECRETS_PATH}`);
+  } else {
+    print('\nCredentials: set via environment variables (not saved to file)');
   }
 
   print('\nUseful commands:');

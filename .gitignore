@@ -1,3 +1,4 @@
 .env
+.secrets
 .twiliodeployinfo
 node_modules/

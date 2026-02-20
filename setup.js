@@ -1417,25 +1417,41 @@ async function step9_configureWebhooks(state, nonInteractive) {
       }
     }
 
-    // Use the regional client for this number's voice region to update webhooks.
-    // Phone number webhook configuration is region-specific for routing.
-    let client = getClientForRegion(state, vr);
-    if (!client) {
-      // Fall back to any available client
-      client = getAnyClient(state);
-    }
-    if (!client) {
-      print(`  Warning: No client available for ${vr}, skipping webhook update.`);
+    // Use regional clients to update webhooks. Some regions (e.g. ie1) don't
+    // support SMS configuration updates, so when voice and SMS use different
+    // regions we must split into separate API calls.
+    const voiceClient = getClientForRegion(state, vr) || getAnyClient(state);
+    const smsClient = getClientForRegion(state, sr) || getAnyClient(state);
+
+    if (!voiceClient && !smsClient) {
+      print(`  Warning: No client available, skipping webhook update.`);
       continue;
     }
 
     try {
-      await client.incomingPhoneNumbers(n.sid).update({
-        voiceUrl,
-        voiceMethod: 'POST',
-        smsUrl,
-        smsMethod: 'POST',
-      });
+      if (voiceClient === smsClient) {
+        // Same client — single update call
+        await voiceClient.incomingPhoneNumbers(n.sid).update({
+          voiceUrl,
+          voiceMethod: 'POST',
+          smsUrl,
+          smsMethod: 'POST',
+        });
+      } else {
+        // Different regions — separate calls to avoid regional restrictions
+        if (voiceClient) {
+          await voiceClient.incomingPhoneNumbers(n.sid).update({
+            voiceUrl,
+            voiceMethod: 'POST',
+          });
+        }
+        if (smsClient) {
+          await smsClient.incomingPhoneNumbers(n.sid).update({
+            smsUrl,
+            smsMethod: 'POST',
+          });
+        }
+      }
       print(`  Updated.`);
     } catch (e) {
       print(`  Error updating webhooks: ${e.message}`);

@@ -273,6 +273,39 @@ function ask(question, defaultVal) {
   });
 }
 
+function askSecret(question, defaultVal) {
+  const suffix = defaultVal ? ' [****]' : '';
+  return new Promise(resolve => {
+    rl.pause();
+    process.stdout.write(`${question}${suffix}: `);
+    const { stdin } = process;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    let input = '';
+    const onData = (ch) => {
+      if (ch === '\r' || ch === '\n') {
+        stdin.removeListener('data', onData);
+        stdin.setRawMode(false);
+        process.stdout.write('\n');
+        rl.resume();
+        resolve(input.trim() || defaultVal || '');
+      } else if (ch === '\u007f' || ch === '\b') {
+        if (input.length > 0) {
+          input = input.slice(0, -1);
+          process.stdout.write('\b \b');
+        }
+      } else if (ch === '\u0003') {
+        process.exit(1);
+      } else {
+        input += ch;
+        process.stdout.write('*');
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
 function pressEnter() {
   return new Promise(resolve => {
     rl.question('\nPress Enter to continue...', () => resolve());
@@ -560,7 +593,7 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
 
     let region;
     if (authType.toLowerCase() === 't') {
-      const token = await ask('Auth Token');
+      const token = await askSecret('Auth Token');
       region = await ask('Region for this token', 'us1');
       if (!VALID_REGIONS.includes(region)) {
         print(`Warning: "${region}" is not recognized, using us1.`);
@@ -569,7 +602,7 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
       state.regionalCredentials[region] = { authToken: token };
     } else {
       const keySid = await ask('API Key SID');
-      const keySecret = await ask('API Key Secret');
+      const keySecret = await askSecret('API Key Secret');
       region = await ask('Region for this key', 'us1');
       if (!VALID_REGIONS.includes(region)) {
         print(`Warning: "${region}" is not recognized, using us1.`);
@@ -861,7 +894,7 @@ async function step3_regions(state, cliArgs, nonInteractive) {
 
     const authType = await ask(`  Use API key (k) or Auth Token (t) for ${region}?`, 'k');
     if (authType.toLowerCase() === 't') {
-      const token = await ask(`  Auth Token for ${region}`);
+      const token = await askSecret(`  Auth Token for ${region}`);
       if (!token) {
         print(`  Skipping ${region} — numbers in this region will fall back.`);
         continue;
@@ -869,7 +902,7 @@ async function step3_regions(state, cliArgs, nonInteractive) {
       state.regionalCredentials[region] = { authToken: token };
     } else {
       const keySid = await ask(`  API Key SID for ${region}`);
-      const keySecret = await ask(`  API Key Secret for ${region}`);
+      const keySecret = await askSecret(`  API Key Secret for ${region}`);
       if (!keySid || !keySecret) {
         print(`  Skipping ${region} — numbers in this region will fall back.`);
         continue;
@@ -1019,10 +1052,10 @@ async function step5_email(state, cliArgs, nonInteractive) {
   let fromEmail = cliArgs.fromEmail || state.env.FROM_EMAIL || '';
 
   if (!nonInteractive) {
-    mailjetKey = await ask('Mailjet API key (blank to skip email)', mailjetKey);
+    mailjetKey = await askSecret('Mailjet API key (blank to skip email)', mailjetKey);
 
     if (mailjetKey) {
-      mailjetSecret = await ask('Mailjet API secret', mailjetSecret);
+      mailjetSecret = await askSecret('Mailjet API secret', mailjetSecret);
       fromEmail = await ask('Sender email address (FROM_EMAIL)', fromEmail);
       forwardingEmail = await ask('Default forwarding email (FORWARDING_EMAIL)', forwardingEmail);
     }

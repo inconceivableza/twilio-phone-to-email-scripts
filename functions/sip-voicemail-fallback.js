@@ -15,13 +15,13 @@ function getNumberConfig(toNumber) {
 }
 
 exports.handler = function(context, event, callback) {
+  const { isEmailConfigured } = require(Runtime.getAssets()['/email-helper.js'].path);
   const twiml = new Twilio.twiml.VoiceResponse();
   const numberConfig = getNumberConfig(event.To);
   const status = event.DialCallStatus;
   console.log(`SIP dial result: ${status}`);
 
-  const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
-    && context.FROM_EMAIL && (numberConfig.forwardingEmail || context.FORWARDING_EMAIL);
+  const emailConfigured = isEmailConfigured(context, numberConfig.forwardingEmail || context.FORWARDING_EMAIL);
 
   if (status === 'completed') {
     // Call was answered and has ended; nothing more to do

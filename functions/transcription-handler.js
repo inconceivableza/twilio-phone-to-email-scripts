@@ -1,4 +1,3 @@
-const mailjet = require('node-mailjet');
 const axios = require('axios');
 
 /**
@@ -67,15 +66,10 @@ function getNumberConfig(toNumber) {
 exports.handler = function(context, event, callback) {
   // Only proceed if transcription is complete
   if (event.TranscriptionStatus === 'completed') {
+    const { sendEmail } = require(Runtime.getAssets()['/email-helper.js'].path);
     const toNumber = event.To || 'Unknown';
     const numberConfig = getNumberConfig(toNumber);
     const forwardingEmail = numberConfig.forwardingEmail || context.FORWARDING_EMAIL;
-
-    // Initialize Mailjet
-    const mailjetClient = mailjet.apiConnect(
-      context.MAILJET_API_KEY,
-      context.MAILJET_API_SECRET
-    );
 
     const transcriptionText = event.TranscriptionText || 'No transcription available';
     const recordingUrl = event.RecordingUrl || '';
@@ -88,24 +82,13 @@ exports.handler = function(context, event, callback) {
     const attachmentFilename = `voicemail_${fromNumber.replace('+', '')}_${dateTimeStr}.mp3`;
     getAttachmentData(recordingUrl, context.ACCOUNT_SID, context.AUTH_TOKEN)
       .then(attachmentData => {
+        const attachments = attachmentData ? [{
+          filename: attachmentFilename,
+          contentType: 'audio/mpeg',
+          base64Content: attachmentData,
+        }] : [];
 
-        // Prepare the email content
-        const emailData = {
-          Messages: [
-            {
-              From: {
-                Email: context.FROM_EMAIL,
-                Name: "Voicemail Service"
-              },
-              To: [
-                {
-                  Email: forwardingEmail,
-                  Name: "Recipient"
-                }
-              ],
-              Subject: `New Voicemail from ${fromNumber}`,
-              TextPart: `You received a new voicemail from ${fromNumber} to your number ${toNumber}.\n\nTranscription: ${transcriptionText}\n\nRecording: ${event.RecordingUrl}.mp3`,
-              HTMLPart: `
+        const htmlBody = `
                 <h2>New Voicemail Received</h2>
                 <p><strong>From:</strong> ${fromNumber}<br/>
                 <strong>To:</strong> ${toNumber}<br/>
@@ -113,26 +96,16 @@ exports.handler = function(context, event, callback) {
                 <p><strong>Recording:</strong> <a href="${event.RecordingUrl}.mp3">Listen to recording</a></p>
               ` + (attachmentData ? `
                 <p>The recording is also attached to this email.</p>
-              ` : ``)
-            }
-          ]
-        };
+              ` : ``);
 
-        // Add attachment if download was successful
-        if (attachmentData) {
-          emailData.Messages[0].Attachments = [
-            {
-              ContentType: 'audio/mpeg',
-              Filename: attachmentFilename,
-              Base64Content: attachmentData
-            }
-          ];
-        }
-
-        // Send the email
-        return mailjetClient
-          .post('send', { version: 'v3.1' })
-          .request(emailData)
+        return sendEmail(context, {
+          to: forwardingEmail,
+          fromName: 'Voicemail Service',
+          subject: `New Voicemail from ${fromNumber}`,
+          textBody: `You received a new voicemail from ${fromNumber} to your number ${toNumber}.\n\nTranscription: ${transcriptionText}\n\nRecording: ${event.RecordingUrl}.mp3`,
+          htmlBody,
+          attachments,
+        });
       })
       .then(result => {
         console.log('Voicemail email sent successfully');

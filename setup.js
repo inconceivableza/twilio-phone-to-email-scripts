@@ -786,33 +786,92 @@ async function step4_phoneNumbers(state, cliArgs, nonInteractive) {
 async function step5_email(state, cliArgs, nonInteractive) {
   printBanner('Step 5: Email Configuration (Optional)');
 
-  print('Voicemails and SMS can be forwarded to email using Mailjet.');
-  print('Sign up at https://www.mailjet.com/ for a free account (200 emails/day).');
+  print('Voicemails and SMS can be forwarded to email.');
+  print('Supported providers: Mailjet, SendGrid, Gmail (SMTP), custom SMTP.');
   print('Leave blank to skip email forwarding entirely.\n');
 
+  let provider = cliArgs.emailProvider || state.env.EMAIL_PROVIDER || '';
   let mailjetKey = cliArgs.mailjetKey || state.allConfig.MAILJET_API_KEY || '';
   let mailjetSecret = cliArgs.mailjetSecret || state.allConfig.MAILJET_API_SECRET || '';
+  let sendgridKey = cliArgs.sendgridKey || state.allConfig.SENDGRID_API_KEY || '';
+  let smtpHost = cliArgs.smtpHost || state.env.SMTP_HOST || '';
+  let smtpPort = cliArgs.smtpPort || state.env.SMTP_PORT || '';
+  let smtpUser = cliArgs.smtpUser || state.env.SMTP_USER || '';
+  let smtpPass = cliArgs.smtpPass || state.allConfig.SMTP_PASS || '';
+  let smtpSecure = cliArgs.smtpSecure || state.env.SMTP_SECURE || '';
   let forwardingEmail = cliArgs.forwardingEmail || state.env.FORWARDING_EMAIL || '';
   let fromEmail = cliArgs.fromEmail || state.env.FROM_EMAIL || '';
 
   if (!nonInteractive) {
-    mailjetKey = await askSecret('Mailjet API key (blank to skip email)', mailjetKey);
+    // Auto-detect existing provider from credentials
+    const defaultProvider = provider || (mailjetKey ? 'mailjet' : '');
+    print('Email providers:');
+    print('  mailjet  — Mailjet (free tier: 200 emails/day)');
+    print('  sendgrid — SendGrid');
+    print('  gmail    — Gmail via SMTP (requires App Password)');
+    print('  smtp     — Custom SMTP server');
+    print('');
+    provider = await ask('Email provider (blank to skip)', defaultProvider);
+    provider = provider.toLowerCase();
 
-    if (mailjetKey) {
+    if (provider === 'mailjet') {
+      mailjetKey = await askSecret('Mailjet API key', mailjetKey);
       mailjetSecret = await askSecret('Mailjet API secret', mailjetSecret);
+    } else if (provider === 'sendgrid') {
+      print('\nNote: Verify your sender email in the SendGrid dashboard under');
+      print('  Settings → Sender Authentication before sending.\n');
+      sendgridKey = await askSecret('SendGrid API key', sendgridKey);
+    } else if (provider === 'gmail') {
+      print('\nGmail requires an App Password (not your regular password):');
+      print('  1. Enable 2-Step Verification on your Google account');
+      print('  2. Create an App Password at myaccount.google.com/apppasswords');
+      print('  3. Enter the 16-character App Password below\n');
+      smtpUser = await ask('Gmail address', smtpUser || fromEmail);
+      smtpPass = await askSecret('Gmail App Password', smtpPass);
+      if (!fromEmail) fromEmail = smtpUser;
+    } else if (provider === 'smtp') {
+      smtpHost = await ask('SMTP host', smtpHost);
+      smtpPort = await ask('SMTP port', smtpPort || '587');
+      smtpSecure = await ask('SMTP use TLS? (true/false)', smtpSecure || 'false');
+      smtpUser = await ask('SMTP username', smtpUser);
+      smtpPass = await askSecret('SMTP password', smtpPass);
+    } else {
+      provider = '';
+    }
+
+    if (provider) {
       fromEmail = await ask('Sender email address (FROM_EMAIL)', fromEmail);
       forwardingEmail = await ask('Default forwarding email (FORWARDING_EMAIL)', forwardingEmail);
     }
   }
 
-  state.emailEnabled = !!(mailjetKey && mailjetSecret);
+  // Determine if email is enabled
+  if (provider === 'mailjet') {
+    state.emailEnabled = !!(mailjetKey && mailjetSecret);
+  } else if (provider === 'sendgrid') {
+    state.emailEnabled = !!sendgridKey;
+  } else if (provider === 'gmail') {
+    state.emailEnabled = !!(smtpUser && smtpPass);
+  } else if (provider === 'smtp') {
+    state.emailEnabled = !!(smtpHost && smtpUser && smtpPass);
+  } else {
+    state.emailEnabled = false;
+  }
+
   state.mailjetKey = mailjetKey;
   state.mailjetSecret = mailjetSecret;
+  state.sendgridKey = sendgridKey;
+  state.smtpPass = smtpPass;
+  if (provider) state.env.EMAIL_PROVIDER = provider;
   state.env.FORWARDING_EMAIL = forwardingEmail;
   state.env.FROM_EMAIL = fromEmail;
+  state.env.SMTP_HOST = smtpHost;
+  state.env.SMTP_PORT = smtpPort;
+  state.env.SMTP_USER = smtpUser;
+  state.env.SMTP_SECURE = smtpSecure;
 
   if (state.emailEnabled) {
-    print(`\nEmail forwarding: enabled (${fromEmail} → ${forwardingEmail})`);
+    print(`\nEmail forwarding: enabled via ${provider} (${fromEmail} → ${forwardingEmail})`);
   } else {
     print('\nEmail forwarding: disabled');
     print('Note: voicemail recordings will not be delivered without email configured.');
@@ -1093,6 +1152,8 @@ async function step7_writeConfig(state, nonInteractive) {
   }
   if (state.mailjetKey) secrets.MAILJET_API_KEY = state.mailjetKey;
   if (state.mailjetSecret) secrets.MAILJET_API_SECRET = state.mailjetSecret;
+  if (state.sendgridKey) secrets.SENDGRID_API_KEY = state.sendgridKey;
+  if (state.smtpPass) secrets.SMTP_PASS = state.smtpPass;
 
   // Ask about .secrets file
   let saveSecrets = false;
@@ -1422,7 +1483,8 @@ function step10_summary(state) {
   }
 
   if (state.emailEnabled) {
-    print(`\nEmail: ${state.env.FROM_EMAIL} → ${state.env.FORWARDING_EMAIL}`);
+    const provider = state.env.EMAIL_PROVIDER || 'mailjet';
+    print(`\nEmail: ${provider} (${state.env.FROM_EMAIL} → ${state.env.FORWARDING_EMAIL})`);
   } else {
     print('\nEmail: disabled');
   }

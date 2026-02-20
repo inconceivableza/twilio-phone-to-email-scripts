@@ -15,12 +15,12 @@ function getNumberConfig(toNumber) {
 }
 
 exports.handler = function(context, event, callback) {
+  const { isEmailConfigured } = require(Runtime.getAssets()['/email-helper.js'].path);
   const twiml = new Twilio.twiml.VoiceResponse();
   const numberConfig = getNumberConfig(event.To);
 
   const sipEnabled = context.SIP_DOMAIN && context.SIP_INBOUND !== 'false';
-  const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
-    && context.FROM_EMAIL && (numberConfig.forwardingEmail || context.FORWARDING_EMAIL);
+  const emailConfigured = isEmailConfigured(context, numberConfig.forwardingEmail || context.FORWARDING_EMAIL);
 
   if (sipEnabled) {
     // Ring the SIP client first; if unanswered, fall back to voicemail

@@ -1,5 +1,3 @@
-const mailjet = require('node-mailjet');
-
 function getNumberConfig(toNumber) {
   try {
     const asset = Runtime.getAssets()['/phone-config.json'];
@@ -11,48 +9,26 @@ function getNumberConfig(toNumber) {
 }
 
 exports.handler = function(context, event, callback) {
+  const { sendEmail, isEmailConfigured } = require(Runtime.getAssets()['/email-helper.js'].path);
   const numberConfig = getNumberConfig(event.To);
   const forwardingEmail = numberConfig.forwardingEmail || context.FORWARDING_EMAIL;
   const smsForwardNumber = numberConfig.smsForwardNumber || context.SMS_FORWARD_NUMBER;
 
-  const emailConfigured = context.MAILJET_API_KEY && context.MAILJET_API_SECRET
-    && context.FROM_EMAIL && forwardingEmail;
+  const emailConfigured = isEmailConfigured(context, forwardingEmail);
 
   const promises = [];
 
   // Send email if configured
   if (emailConfigured) {
-    const mailjetClient = mailjet.apiConnect(
-      context.MAILJET_API_KEY,
-      context.MAILJET_API_SECRET
-    );
-
-    const emailData = {
-      Messages: [
-        {
-          From: {
-            Email: context.FROM_EMAIL,
-            Name: "SMS Forwarding Service"
-          },
-          To: [
-            {
-              Email: forwardingEmail,
-              Name: "Recipient"
-            }
-          ],
-          Subject: `New SMS from ${event.From}`,
-          TextPart: `You received a new SMS from ${event.From} to your number ${event.To}.\n\nMessage: ${event.Body}`
-        }
-      ]
-    };
-
     promises.push(
-      mailjetClient
-        .post('send', { version: 'v3.1' })
-        .request(emailData)
-        .then(() => {
-          console.log('SMS email sent successfully');
-        })
+      sendEmail(context, {
+        to: forwardingEmail,
+        fromName: 'SMS Forwarding Service',
+        subject: `New SMS from ${event.From}`,
+        textBody: `You received a new SMS from ${event.From} to your number ${event.To}.\n\nMessage: ${event.Body}`,
+      }).then(() => {
+        console.log('SMS email sent successfully');
+      })
     );
   } else {
     console.log('Email not configured; skipping SMS-to-email forwarding');

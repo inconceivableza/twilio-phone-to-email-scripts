@@ -219,6 +219,23 @@ async function step1_credentials(state, cliArgs, nonInteractive) {
     }
   }
 
+  // Prompt for missing secrets on entries that have an API key SID but no secret
+  if (!nonInteractive) {
+    for (const region of Object.keys(state.regionalCredentials)) {
+      const creds = state.regionalCredentials[region];
+      if (creds.apiKeySid && !creds.apiKeySecret && !creds.authToken) {
+        print(`\nAPI Key SID found for ${region}: ${creds.apiKeySid}`);
+        const confirmedSid = await ask(`  Confirm API Key SID for ${region}`, creds.apiKeySid);
+        creds.apiKeySid = confirmedSid;
+        creds.apiKeySecret = await askSecret(`  API Key Secret for ${region}`);
+        if (!creds.apiKeySecret) {
+          print(`  No secret provided — removing ${region} credentials.`);
+          delete state.regionalCredentials[region];
+        }
+      }
+    }
+  }
+
   // If no credentials yet, prompt for initial credentials
   if (Object.keys(state.regionalCredentials).length === 0) {
     if (nonInteractive) {

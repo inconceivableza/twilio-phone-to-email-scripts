@@ -2,3 +2,4 @@
 .secrets
 .twiliodeployinfo
 node_modules/
+assets/*.private.json
